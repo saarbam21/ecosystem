@@ -26,7 +26,7 @@ export const metadata = {
     "השקעות",
     "פנסיה",
     "הכנסה פסיבית",
-    "סער בם",
+    "סער באם",
   ],
   openGraph: {
     title: `${site.name} | ${site.tagline}`,
