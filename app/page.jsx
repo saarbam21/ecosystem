@@ -83,7 +83,7 @@ export default function HomePage() {
               <dl className="mt-6 grid grid-cols-3 gap-4 border-t border-slate-100 pt-6 text-center">
                 <div>
                   <dt className="text-2xl font-extrabold text-brand-700">20+</dt>
-                  <dd className="text-xs text-ink-soft">שנות ניסיון</dd>
+                  <dd className="text-xs text-ink-soft">שנות ניסיון בשוק ההון</dd>
                 </div>
                 <div>
                   <dt className="text-lg font-extrabold leading-tight text-brand-700">
