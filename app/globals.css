@@ -1,0 +1,107 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+  body {
+    @apply bg-white text-ink antialiased;
+  }
+  ::selection {
+    @apply bg-brand-200 text-ink;
+  }
+  /* Visible keyboard focus for all interactive elements */
+  a:focus-visible,
+  button:focus-visible,
+  input:focus-visible,
+  textarea:focus-visible,
+  select:focus-visible,
+  summary:focus-visible {
+    outline: 2px solid theme(colors.brand.700);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+}
+
+/* Respect users who prefer reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@layer components {
+  .container-page {
+    @apply mx-auto w-full max-w-6xl px-5 sm:px-8;
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-full px-6 py-3 text-base font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2;
+  }
+  .btn-primary {
+    @apply btn bg-brand-700 text-white shadow-card hover:bg-brand-800;
+  }
+  .btn-outline {
+    @apply btn border border-brand-300 bg-white text-brand-700 hover:border-brand-500 hover:bg-brand-50;
+  }
+  .btn-whatsapp {
+    @apply btn bg-[#0b7a3b] text-white hover:bg-[#096a33];
+  }
+  .card {
+    @apply rounded-2xl border border-slate-100 bg-white p-7 shadow-card;
+  }
+  .eyebrow {
+    @apply text-sm font-bold uppercase tracking-wide text-brand-700;
+  }
+  .skip-link {
+    @apply absolute right-4 top-4 z-[100] -translate-y-20 rounded-lg bg-brand-700 px-4 py-2 font-semibold text-white transition focus:translate-y-0;
+  }
+  .section {
+    @apply py-16 sm:py-24;
+  }
+}
+
+/* Rich text rendered from markdown blog posts */
+.prose-he {
+  @apply text-lg leading-relaxed text-ink-soft;
+}
+.prose-he h2 {
+  @apply mt-10 mb-4 text-2xl font-bold text-ink;
+}
+.prose-he h3 {
+  @apply mt-8 mb-3 text-xl font-bold text-ink;
+}
+.prose-he p {
+  @apply my-5;
+}
+.prose-he ul {
+  @apply my-5 list-disc space-y-2 pr-6;
+}
+.prose-he ol {
+  @apply my-5 list-decimal space-y-2 pr-6;
+}
+.prose-he a {
+  @apply font-semibold text-brand-700 underline underline-offset-2;
+}
+.prose-he strong {
+  @apply font-bold text-ink;
+}
+.prose-he blockquote {
+  @apply my-6 border-r-4 border-brand-300 bg-brand-50 px-5 py-3 text-ink;
+}
+.prose-he table {
+  @apply my-6 w-full border-collapse text-base;
+}
+.prose-he th,
+.prose-he td {
+  @apply border border-slate-200 px-3 py-2 text-right;
+}
+.prose-he th {
+  @apply bg-slate-50 font-bold text-ink;
+}

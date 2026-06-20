@@ -1,0 +1,14 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "redirects": [
+    { "source": "/בלוג", "destination": "/blog", "permanent": true },
+    { "source": "/השירותים-שלי", "destination": "/services", "permanent": true },
+    { "source": "/שאלות-ותשובות", "destination": "/faq", "permanent": true },
+    { "source": "/אודות", "destination": "/about", "permanent": true },
+    { "source": "/צור-קשר", "destination": "/contact", "permanent": true },
+    { "source": "/מדיניות-פרטיות", "destination": "/privacy", "permanent": true },
+    { "source": "/הצהרת-נגישות", "destination": "/accessibility", "permanent": true },
+    { "source": "/למשוך-או-לא-למשוך-זו-השאלה", "destination": "/blog/to-withdraw-or-not", "permanent": true },
+    { "source": "/המרכיב-הלא-סודי-של-קרנות-הפנסיה", "destination": "/blog/pension-funds-secret-component", "permanent": true }
+  ]
+}
