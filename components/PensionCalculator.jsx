@@ -161,7 +161,9 @@ function PersonPanel({ person, onChange, showLabel }) {
   return (
     <div className="card">
       {showLabel && (
-        <h3 className="mb-4 text-lg font-bold text-ink">{person.label}</h3>
+        <h3 className="mb-4 text-lg font-bold text-ink">
+          {person.gender === "male" ? "בן זוג" : "בת זוג"}
+        </h3>
       )}
 
       {/* Gender */}
@@ -360,12 +362,12 @@ export default function PensionCalculator() {
   const setMode2 = (m) => {
     setMode(m);
     if (m === "couple" && persons.length === 1) {
-      setPersons([
-        { ...persons[0], label: "בן/בת זוג 1" },
-        newPerson("בן/בת זוג 2"),
-      ]);
+      const p2 = newPerson();
+      p2.gender = "female";
+      p2.retireAge = legalRetirementAge("female", p2.currentAge);
+      setPersons([persons[0], p2]);
     } else if (m === "single") {
-      setPersons([{ ...persons[0], label: "בן/בת זוג 1" }]);
+      setPersons([persons[0]]);
     }
   };
 
