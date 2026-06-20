@@ -1,20 +1,36 @@
-# Redirects from old WordPress (Hebrew) URLs to the new routes — Cloudflare Pages format
-# Both with and without trailing slash, since old WordPress URLs used a trailing slash.
-/בלוג /blog/ 301
+# Redirects from old WordPress (Hebrew) URLs to the new routes — Cloudflare Pages format.
+# Includes decoded (UTF-8) and percent-encoded variants, with/without trailing slash,
+# because Cloudflare Pages matching of non-ASCII source paths is inconsistent.
+
+# --- decoded, with trailing slash ---
 /בלוג/ /blog/ 301
-/השירותים-שלי /services/ 301
 /השירותים-שלי/ /services/ 301
-/שאלות-ותשובות /faq/ 301
 /שאלות-ותשובות/ /faq/ 301
-/אודות /about/ 301
 /אודות/ /about/ 301
-/צור-קשר /contact/ 301
 /צור-קשר/ /contact/ 301
-/מדיניות-פרטיות /privacy/ 301
 /מדיניות-פרטיות/ /privacy/ 301
-/הצהרת-נגישות /accessibility/ 301
 /הצהרת-נגישות/ /accessibility/ 301
-/למשוך-או-לא-למשוך-זו-השאלה /blog/to-withdraw-or-not/ 301
 /למשוך-או-לא-למשוך-זו-השאלה/ /blog/to-withdraw-or-not/ 301
-/המרכיב-הלא-סודי-של-קרנות-הפנסיה /blog/pension-funds-secret-component/ 301
 /המרכיב-הלא-סודי-של-קרנות-הפנסיה/ /blog/pension-funds-secret-component/ 301
+
+# --- decoded, without trailing slash ---
+/בלוג /blog/ 301
+/השירותים-שלי /services/ 301
+/שאלות-ותשובות /faq/ 301
+/אודות /about/ 301
+/צור-קשר /contact/ 301
+/מדיניות-פרטיות /privacy/ 301
+/הצהרת-נגישות /accessibility/ 301
+/למשוך-או-לא-למשוך-זו-השאלה /blog/to-withdraw-or-not/ 301
+/המרכיב-הלא-סודי-של-קרנות-הפנסיה /blog/pension-funds-secret-component/ 301
+
+# --- percent-encoded, with trailing slash ---
+/%D7%91%D7%9C%D7%95%D7%92/ /blog/ 301
+/%D7%94%D7%A9%D7%99%D7%A8%D7%95%D7%AA%D7%99%D7%9D-%D7%A9%D7%9C%D7%99/ /services/ 301
+/%D7%A9%D7%90%D7%9C%D7%95%D7%AA-%D7%95%D7%AA%D7%A9%D7%95%D7%91%D7%95%D7%AA/ /faq/ 301
+/%D7%90%D7%95%D7%93%D7%95%D7%AA/ /about/ 301
+/%D7%A6%D7%95%D7%A8-%D7%A7%D7%A9%D7%A8/ /contact/ 301
+/%D7%9E%D7%93%D7%99%D7%A0%D7%99%D7%95%D7%AA-%D7%A4%D7%A8%D7%98%D7%99%D7%95%D7%AA/ /privacy/ 301
+/%D7%94%D7%A6%D7%94%D7%A8%D7%AA-%D7%A0%D7%92%D7%99%D7%A9%D7%95%D7%AA/ /accessibility/ 301
+/%D7%9C%D7%9E%D7%A9%D7%95%D7%9A-%D7%90%D7%95-%D7%9C%D7%90-%D7%9C%D7%9E%D7%A9%D7%95%D7%9A-%D7%96%D7%95-%D7%94%D7%A9%D7%90%D7%9C%D7%94/ /blog/to-withdraw-or-not/ 301
+/%D7%94%D7%9E%D7%A8%D7%9B%D7%99%D7%91-%D7%94%D7%9C%D7%90-%D7%A1%D7%95%D7%93%D7%99-%D7%A9%D7%9C-%D7%A7%D7%A8%D7%A0%D7%95%D7%AA-%D7%94%D7%A4%D7%A0%D7%A1%D7%99%D7%94/ /blog/pension-funds-secret-component/ 301
