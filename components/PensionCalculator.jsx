@@ -49,45 +49,47 @@ const newPortfolio = () => ({
   name: "",
   balance: "",
   monthly: "",
-  fee: "0.5",
+  feeBalance: "0.5",
+  feeDeposit: "1",
 });
 
 const newPerson = (label) => ({
   label,
   gender: "male",
   currentAge: 40,
+  workStopAge: 67,
   retireAge: 67,
   annualReturn: 4,
   factor: 200,
-  recognizedMode: "percent",
-  recognizedValue: "",
   portfolios: [newPortfolio()],
 });
 
 function projectPerson(p) {
-  const n = Math.max(0, num(p.retireAge) - num(p.currentAge));
-  const months = n * 12;
+  const currentAge = num(p.currentAge);
+  const retireAge = num(p.retireAge);
+  // Contributions stop at work-stop age; afterwards the balance only grows.
+  const workStop = Math.max(currentAge, Math.min(num(p.workStopAge), retireAge));
+  const t1 = Math.max(0, workStop - currentAge); // years contributing
+  const t2 = Math.max(0, retireAge - workStop); // years growth-only
+  const n = Math.max(0, retireAge - currentAge);
   let total = 0;
   for (const f of p.portfolios) {
     const balance = num(f.balance);
-    const monthly = num(f.monthly);
-    const net = (num(p.annualReturn) - num(f.fee)) / 100;
+    const netMonthly = num(f.monthly) * (1 - num(f.feeDeposit) / 100);
+    const net = (num(p.annualReturn) - num(f.feeBalance)) / 100;
     const i = Math.pow(1 + net, 1 / 12) - 1;
-    const fvBalance = balance * Math.pow(1 + net, n);
-    const fvContrib =
+    const months1 = t1 * 12;
+    const fvBalanceAtStop = balance * Math.pow(1 + net, t1);
+    const fvContribAtStop =
       Math.abs(i) < 1e-9
-        ? monthly * months
-        : monthly * ((Math.pow(1 + i, months) - 1) / i);
-    total += fvBalance + fvContrib;
+        ? netMonthly * months1
+        : netMonthly * ((Math.pow(1 + i, months1) - 1) / i);
+    const fvAtRetire = (fvBalanceAtStop + fvContribAtStop) * Math.pow(1 + net, t2);
+    total += fvAtRetire;
   }
   const factor = num(p.factor) || 1;
   const pension = total / factor;
-  const recognizedAmount =
-    p.recognizedMode === "percent"
-      ? total * (num(p.recognizedValue) / 100)
-      : Math.min(num(p.recognizedValue), total);
-  const recognizedPension = recognizedAmount / factor;
-  return { n, total, pension, recognizedPension };
+  return { n, total, pension };
 }
 
 function Slider({ label, value, min, max, step = 1, suffix = "", display, onChange }) {
@@ -153,10 +155,18 @@ function PersonPanel({ person, onChange, showLabel }) {
   const res = projectPerson(person);
   const legal = legalRetirementAge(person.gender, person.currentAge);
 
-  const setGender = (gender) =>
-    set({ gender, retireAge: legalRetirementAge(gender, person.currentAge) });
-  const setCurrentAge = (v) =>
-    set({ currentAge: v, retireAge: legalRetirementAge(person.gender, v) });
+  const setGender = (gender) => {
+    const r = legalRetirementAge(gender, person.currentAge);
+    set({ gender, retireAge: r, workStopAge: r });
+  };
+  const setCurrentAge = (v) => {
+    const r = legalRetirementAge(person.gender, v);
+    set({ currentAge: v, retireAge: r, workStopAge: r });
+  };
+  const setRetireAge = (v) =>
+    set({ retireAge: v, workStopAge: Math.min(num(person.workStopAge), v) });
+  const setWorkStopAge = (v) =>
+    set({ workStopAge: Math.max(num(person.currentAge), Math.min(v, num(person.retireAge))) });
 
   return (
     <div className="card">
@@ -200,12 +210,25 @@ function PersonPanel({ person, onChange, showLabel }) {
         />
         <div>
           <Slider
+            label="גיל הפסקת עבודה"
+            value={person.workStopAge}
+            min={18}
+            max={75}
+            display={formatAge(person.workStopAge)}
+            onChange={setWorkStopAge}
+          />
+          <p className="mt-1 text-xs text-ink-soft">
+            מגיל זה ואילך לא מבוצעות הפקדות נוספות.
+          </p>
+        </div>
+        <div>
+          <Slider
             label="גיל פרישה"
             value={person.retireAge}
             min={60}
             max={75}
             display={formatAge(person.retireAge)}
-            onChange={(v) => set({ retireAge: v })}
+            onChange={setRetireAge}
           />
           <p className="mt-1 text-xs text-ink-soft">
             גיל פרישה לפי חוק ({person.gender === "male" ? "גבר" : "אישה"}):{" "}
@@ -263,7 +286,7 @@ function PersonPanel({ person, onChange, showLabel }) {
                   </button>
                 )}
               </div>
-              <div className="grid gap-3 sm:grid-cols-3">
+              <div className="grid gap-3 sm:grid-cols-2">
                 <NumField
                   label="צבירה נוכחית"
                   value={f.balance}
@@ -279,11 +302,18 @@ function PersonPanel({ person, onChange, showLabel }) {
                   onChange={(v) => setPortfolio(f.id, { monthly: v })}
                 />
                 <NumField
-                  label="דמי ניהול (שנתי)"
-                  value={f.fee}
+                  label="דמי ניהול מצבירה (שנתי)"
+                  value={f.feeBalance}
                   placeholder="0"
                   suffix="%"
-                  onChange={(v) => setPortfolio(f.id, { fee: v })}
+                  onChange={(v) => setPortfolio(f.id, { feeBalance: v })}
+                />
+                <NumField
+                  label="דמי ניהול מהפקדה"
+                  value={f.feeDeposit}
+                  placeholder="0"
+                  suffix="%"
+                  onChange={(v) => setPortfolio(f.id, { feeDeposit: v })}
                 />
               </div>
             </div>
@@ -302,54 +332,21 @@ function PersonPanel({ person, onChange, showLabel }) {
       </div>
 
       {/* Pension conversion */}
-      <div className="mt-5 grid gap-3 sm:grid-cols-2">
+      <div className="mt-5">
         <NumField
           label="מקדם המרה לקצבה"
           value={person.factor}
           placeholder="200"
           onChange={(v) => set({ factor: v })}
         />
-        <div>
-          <label className="mb-1 block text-sm font-medium text-ink">
-            קצבה מוכרת
-          </label>
-          <div className="flex gap-2">
-            <input
-              type="number"
-              inputMode="decimal"
-              dir="ltr"
-              value={person.recognizedValue}
-              placeholder="0"
-              onChange={(e) => set({ recognizedValue: e.target.value })}
-              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-right outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
-            />
-            <select
-              value={person.recognizedMode}
-              onChange={(e) => set({ recognizedMode: e.target.value })}
-              className="rounded-lg border border-slate-200 px-2 py-2 text-sm outline-none focus:border-brand-500"
-              aria-label="יחידת קצבה מוכרת"
-            >
-              <option value="percent">%</option>
-              <option value="amount">₪</option>
-            </select>
-          </div>
-        </div>
       </div>
 
       {/* Result: pension */}
       <div className="mt-5 rounded-xl border-2 border-brand-200 bg-white p-4 text-center">
-        <p className="text-sm text-ink-soft">קצבה חודשית צפויה</p>
+        <p className="text-sm text-ink-soft">קצבה חודשית צפויה (ברוטו)</p>
         <p className="mt-1 text-3xl font-extrabold text-brand-700">
           {ILS.format(res.pension)}
         </p>
-        {res.recognizedPension > 0 && (
-          <p className="mt-2 text-sm text-ink-soft">
-            מתוכה קצבה מוכרת (פטורה ממס):{" "}
-            <span className="font-bold text-ink">
-              {ILS.format(res.recognizedPension)}
-            </span>
-          </p>
-        )}
       </div>
     </div>
   );
@@ -424,7 +421,7 @@ export default function PensionCalculator() {
               <p className="text-2xl font-extrabold">{ILS.format(totalAccum)}</p>
             </div>
             <div>
-              <p className="text-sm text-brand-50/90">קצבה חודשית משותפת</p>
+              <p className="text-sm text-brand-50/90">קצבה חודשית משותפת (ברוטו)</p>
               <p className="text-2xl font-extrabold">
                 {ILS.format(totalPension)}
               </p>
