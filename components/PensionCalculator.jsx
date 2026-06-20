@@ -13,6 +13,36 @@ function num(v) {
   return isNaN(n) ? 0 : n;
 }
 
+// Legal retirement age (גיל פרישה) per Israeli law / Bituach Leumi.
+// Men: 67. Women: rises gradually 62 -> 65 by year of birth.
+const WOMEN_BY_BIRTH_YEAR = {
+  1960: 62 + 4 / 12,
+  1961: 62 + 8 / 12,
+  1962: 63,
+  1963: 63 + 3 / 12,
+  1964: 63 + 6 / 12,
+  1965: 63 + 9 / 12,
+  1966: 64,
+  1967: 64 + 3 / 12,
+  1968: 64 + 6 / 12,
+  1969: 64 + 9 / 12,
+};
+
+function legalRetirementAge(gender, currentAge) {
+  if (gender === "male") return 67;
+  const birthYear = new Date().getFullYear() - Math.round(num(currentAge));
+  if (birthYear <= 1959) return 62;
+  if (birthYear >= 1970) return 65;
+  return WOMEN_BY_BIRTH_YEAR[birthYear] ?? 65;
+}
+
+function formatAge(age) {
+  const y = Math.floor(age);
+  const m = Math.round((age - y) * 12);
+  if (m === 0) return `${y}`;
+  return `${y} ו-${m} ח׳`;
+}
+
 let pid = 0;
 const newPortfolio = () => ({
   id: ++pid,
@@ -24,6 +54,7 @@ const newPortfolio = () => ({
 
 const newPerson = (label) => ({
   label,
+  gender: "male",
   currentAge: 40,
   retireAge: 67,
   annualReturn: 4,
@@ -59,14 +90,13 @@ function projectPerson(p) {
   return { n, total, pension, recognizedPension };
 }
 
-function Slider({ label, value, min, max, step = 1, suffix = "", onChange }) {
+function Slider({ label, value, min, max, step = 1, suffix = "", display, onChange }) {
   return (
     <div>
       <div className="mb-1 flex items-center justify-between">
         <label className="font-medium text-ink">{label}</label>
         <span className="font-bold text-brand-700">
-          {value}
-          {suffix}
+          {display ?? `${value}${suffix}`}
         </span>
       </div>
       <input
@@ -121,6 +151,12 @@ function PersonPanel({ person, onChange, showLabel }) {
     set({ portfolios: person.portfolios.filter((f) => f.id !== id) });
 
   const res = projectPerson(person);
+  const legal = legalRetirementAge(person.gender, person.currentAge);
+
+  const setGender = (gender) =>
+    set({ gender, retireAge: legalRetirementAge(gender, person.currentAge) });
+  const setCurrentAge = (v) =>
+    set({ currentAge: v, retireAge: legalRetirementAge(person.gender, v) });
 
   return (
     <div className="card">
@@ -128,21 +164,58 @@ function PersonPanel({ person, onChange, showLabel }) {
         <h3 className="mb-4 text-lg font-bold text-ink">{person.label}</h3>
       )}
 
+      {/* Gender */}
+      <div className="mb-5">
+        <span className="mb-1 block font-medium text-ink">מין</span>
+        <div className="inline-flex rounded-full border border-slate-200 bg-white p-1">
+          {[
+            { k: "male", t: "גבר" },
+            { k: "female", t: "אישה" },
+          ].map((o) => (
+            <button
+              key={o.k}
+              type="button"
+              onClick={() => setGender(o.k)}
+              className={`rounded-full px-5 py-1.5 text-sm font-semibold transition ${
+                person.gender === o.k
+                  ? "bg-brand-700 text-white"
+                  : "text-ink-soft hover:text-brand-700"
+              }`}
+            >
+              {o.t}
+            </button>
+          ))}
+        </div>
+      </div>
+
       <div className="space-y-5">
         <Slider
           label="גיל נוכחי"
           value={person.currentAge}
           min={18}
           max={74}
-          onChange={(v) => set({ currentAge: v })}
+          onChange={setCurrentAge}
         />
-        <Slider
-          label="גיל פרישה"
-          value={person.retireAge}
-          min={60}
-          max={75}
-          onChange={(v) => set({ retireAge: v })}
-        />
+        <div>
+          <Slider
+            label="גיל פרישה"
+            value={person.retireAge}
+            min={60}
+            max={75}
+            display={formatAge(person.retireAge)}
+            onChange={(v) => set({ retireAge: v })}
+          />
+          <p className="mt-1 text-xs text-ink-soft">
+            גיל פרישה לפי חוק ({person.gender === "male" ? "גבר" : "אישה"}):{" "}
+            <button
+              type="button"
+              onClick={() => set({ retireAge: legal })}
+              className="font-semibold text-brand-700 hover:underline"
+            >
+              {formatAge(legal)}
+            </button>
+          </p>
+        </div>
         <Slider
           label="תשואה שנתית צפויה"
           value={person.annualReturn}
