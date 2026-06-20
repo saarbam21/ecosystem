@@ -1,10 +1,20 @@
 # Redirects from old WordPress (Hebrew) URLs to the new routes — Cloudflare Pages format
+# Both with and without trailing slash, since old WordPress URLs used a trailing slash.
 /בלוג /blog/ 301
+/בלוג/ /blog/ 301
 /השירותים-שלי /services/ 301
+/השירותים-שלי/ /services/ 301
 /שאלות-ותשובות /faq/ 301
+/שאלות-ותשובות/ /faq/ 301
 /אודות /about/ 301
+/אודות/ /about/ 301
 /צור-קשר /contact/ 301
+/צור-קשר/ /contact/ 301
 /מדיניות-פרטיות /privacy/ 301
+/מדיניות-פרטיות/ /privacy/ 301
 /הצהרת-נגישות /accessibility/ 301
+/הצהרת-נגישות/ /accessibility/ 301
 /למשוך-או-לא-למשוך-זו-השאלה /blog/to-withdraw-or-not/ 301
+/למשוך-או-לא-למשוך-זו-השאלה/ /blog/to-withdraw-or-not/ 301
 /המרכיב-הלא-סודי-של-קרנות-הפנסיה /blog/pension-funds-secret-component/ 301
+/המרכיב-הלא-סודי-של-קרנות-הפנסיה/ /blog/pension-funds-secret-component/ 301
