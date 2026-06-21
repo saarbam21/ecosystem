@@ -1,8 +1,6 @@
 import { Heebo } from "next/font/google";
 import "./globals.css";
-import Header from "@/components/Header";
-import Footer from "@/components/Footer";
-import WhatsAppFloat from "@/components/WhatsAppFloat";
+import SiteChrome from "@/components/SiteChrome";
 import { site } from "@/lib/site";
 
 const heebo = Heebo({
@@ -45,15 +43,7 @@ export default function RootLayout({ children }) {
   return (
     <html lang="he" dir="rtl" className={heebo.variable}>
       <body className="flex min-h-screen flex-col font-sans">
-        <a href="#main" className="skip-link">
-          דלג לתוכן הראשי
-        </a>
-        <Header />
-        <main id="main" className="flex-1">
-          {children}
-        </main>
-        <Footer />
-        <WhatsAppFloat />
+        <SiteChrome>{children}</SiteChrome>
       </body>
     </html>
   );
