@@ -59,6 +59,7 @@ const newPerson = (label) => ({
   currentAge: 40,
   workStopAge: 67,
   retireAge: 67,
+  retireLinked: true,
   annualReturn: 4,
   factor: 200,
   portfolios: [newPortfolio()],
@@ -157,16 +158,24 @@ function PersonPanel({ person, onChange, showLabel }) {
 
   const setGender = (gender) => {
     const r = legalRetirementAge(gender, person.currentAge);
-    set({ gender, retireAge: r, workStopAge: r });
+    set({ gender, retireAge: r, workStopAge: r, retireLinked: true });
   };
   const setCurrentAge = (v) => {
     const r = legalRetirementAge(person.gender, v);
-    set({ currentAge: v, retireAge: r, workStopAge: r });
+    set({ currentAge: v, retireAge: r, workStopAge: r, retireLinked: true });
+  };
+  // Retirement mirrors work-stop by default; dragging retirement decouples it.
+  const setWorkStopAge = (v) => {
+    const w = Math.max(num(person.currentAge), v);
+    if (person.retireLinked) set({ workStopAge: w, retireAge: w });
+    else set({ workStopAge: Math.min(w, num(person.retireAge)) });
   };
   const setRetireAge = (v) =>
-    set({ retireAge: v, workStopAge: Math.min(num(person.workStopAge), v) });
-  const setWorkStopAge = (v) =>
-    set({ workStopAge: Math.max(num(person.currentAge), Math.min(v, num(person.retireAge))) });
+    set({
+      retireLinked: false,
+      retireAge: v,
+      workStopAge: Math.min(num(person.workStopAge), v),
+    });
 
   return (
     <div className="card">
@@ -212,7 +221,7 @@ function PersonPanel({ person, onChange, showLabel }) {
           <Slider
             label="גיל הפסקת עבודה"
             value={person.workStopAge}
-            min={18}
+            min={45}
             max={75}
             display={formatAge(person.workStopAge)}
             onChange={setWorkStopAge}
@@ -225,7 +234,7 @@ function PersonPanel({ person, onChange, showLabel }) {
           <Slider
             label="גיל פרישה"
             value={person.retireAge}
-            min={60}
+            min={45}
             max={75}
             display={formatAge(person.retireAge)}
             onChange={setRetireAge}
@@ -234,7 +243,13 @@ function PersonPanel({ person, onChange, showLabel }) {
             גיל פרישה לפי חוק ({person.gender === "male" ? "גבר" : "אישה"}):{" "}
             <button
               type="button"
-              onClick={() => set({ retireAge: legal })}
+              onClick={() =>
+                set({
+                  retireLinked: false,
+                  retireAge: legal,
+                  workStopAge: Math.min(num(person.workStopAge), legal),
+                })
+              }
               className="font-semibold text-brand-700 hover:underline"
             >
               {formatAge(legal)}
@@ -332,13 +347,15 @@ function PersonPanel({ person, onChange, showLabel }) {
       </div>
 
       {/* Pension conversion */}
-      <div className="mt-5">
-        <NumField
-          label="מקדם המרה לקצבה"
-          value={person.factor}
-          placeholder="200"
-          onChange={(v) => set({ factor: v })}
-        />
+      <div className="mt-5 flex justify-center">
+        <div className="w-44 text-center">
+          <NumField
+            label="מקדם המרה לקצבה"
+            value={person.factor}
+            placeholder="200"
+            onChange={(v) => set({ factor: v })}
+          />
+        </div>
       </div>
 
       {/* Result: pension */}
