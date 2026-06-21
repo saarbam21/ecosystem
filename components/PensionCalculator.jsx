@@ -13,6 +13,15 @@ function num(v) {
   return isNaN(n) ? 0 : n;
 }
 
+// Format a numeric string with thousands separators while typing.
+function formatThousands(str) {
+  const cleaned = String(str ?? "").replace(/[^\d.]/g, "");
+  if (cleaned === "") return "";
+  const [intPart, ...rest] = cleaned.split(".");
+  const dec = rest.length ? "." + rest.join("") : "";
+  return intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ",") + dec;
+}
+
 // Legal retirement age (גיל פרישה) per Israeli law / Bituach Leumi.
 // Men: 67. Women: rises gradually 62 -> 65 by year of birth.
 const WOMEN_BY_BIRTH_YEAR = {
@@ -116,18 +125,20 @@ function Slider({ label, value, min, max, step = 1, suffix = "", display, onChan
   );
 }
 
-function NumField({ label, value, onChange, placeholder, suffix }) {
+function NumField({ label, value, onChange, placeholder, suffix, thousands }) {
+  const handle = (e) =>
+    onChange(thousands ? formatThousands(e.target.value) : e.target.value);
   return (
     <div>
       <label className="mb-1 block text-sm font-medium text-ink">{label}</label>
       <div className="relative">
         <input
-          type="number"
-          inputMode="decimal"
+          type={thousands ? "text" : "number"}
+          inputMode={thousands ? "numeric" : "decimal"}
           dir="ltr"
           value={value}
           placeholder={placeholder}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={handle}
           className="w-full rounded-lg border border-slate-200 px-3 py-2 text-right text-ink outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
         />
         {suffix && (
@@ -168,14 +179,9 @@ function PersonPanel({ person, onChange, showLabel }) {
   const setWorkStopAge = (v) => {
     const w = Math.max(num(person.currentAge), v);
     if (person.retireLinked) set({ workStopAge: w, retireAge: w });
-    else set({ workStopAge: Math.min(w, num(person.retireAge)) });
+    else set({ workStopAge: w });
   };
-  const setRetireAge = (v) =>
-    set({
-      retireLinked: false,
-      retireAge: v,
-      workStopAge: Math.min(num(person.workStopAge), v),
-    });
+  const setRetireAge = (v) => set({ retireLinked: false, retireAge: v });
 
   return (
     <div className="card">
@@ -232,7 +238,7 @@ function PersonPanel({ person, onChange, showLabel }) {
         </div>
         <div>
           <Slider
-            label="גיל פרישה"
+            label="גיל פרישה (תחילת משיכת קצבה)"
             value={person.retireAge}
             min={45}
             max={75}
@@ -243,13 +249,7 @@ function PersonPanel({ person, onChange, showLabel }) {
             גיל פרישה לפי חוק ({person.gender === "male" ? "גבר" : "אישה"}):{" "}
             <button
               type="button"
-              onClick={() =>
-                set({
-                  retireLinked: false,
-                  retireAge: legal,
-                  workStopAge: Math.min(num(person.workStopAge), legal),
-                })
-              }
+              onClick={() => set({ retireLinked: false, retireAge: legal })}
               className="font-semibold text-brand-700 hover:underline"
             >
               {formatAge(legal)}
@@ -261,7 +261,7 @@ function PersonPanel({ person, onChange, showLabel }) {
           value={person.annualReturn}
           min={0}
           max={12}
-          step={0.1}
+          step={0.5}
           suffix="%"
           onChange={(v) => set({ annualReturn: v })}
         />
@@ -307,6 +307,7 @@ function PersonPanel({ person, onChange, showLabel }) {
                   value={f.balance}
                   placeholder="0"
                   suffix="₪"
+                  thousands
                   onChange={(v) => setPortfolio(f.id, { balance: v })}
                 />
                 <NumField
@@ -314,6 +315,7 @@ function PersonPanel({ person, onChange, showLabel }) {
                   value={f.monthly}
                   placeholder="0"
                   suffix="₪"
+                  thousands
                   onChange={(v) => setPortfolio(f.id, { monthly: v })}
                 />
                 <NumField
