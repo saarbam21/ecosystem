@@ -169,21 +169,23 @@ function PersonPanel({ person, onChange, showLabel }) {
   const res = projectPerson(person);
   const legal = legalRetirementAge(person.gender, person.currentAge);
 
+  // Constraints: work-stop >= current age; retirement >= 60.
   const setGender = (gender) => {
-    const r = legalRetirementAge(gender, person.currentAge);
-    set({ gender, retireAge: r, workStopAge: r, retireLinked: true });
+    const w = Math.max(num(person.currentAge), legalRetirementAge(gender, person.currentAge));
+    set({ gender, workStopAge: w, retireAge: Math.max(60, w), retireLinked: true });
   };
   const setCurrentAge = (v) => {
-    const r = legalRetirementAge(person.gender, v);
-    set({ currentAge: v, retireAge: r, workStopAge: r, retireLinked: true });
+    const w = Math.max(v, legalRetirementAge(person.gender, v));
+    set({ currentAge: v, workStopAge: w, retireAge: Math.max(60, w), retireLinked: true });
   };
   // Retirement mirrors work-stop by default; dragging retirement decouples it.
   const setWorkStopAge = (v) => {
     const w = Math.max(num(person.currentAge), v);
-    if (person.retireLinked) set({ workStopAge: w, retireAge: w });
+    if (person.retireLinked) set({ workStopAge: w, retireAge: Math.max(60, w) });
     else set({ workStopAge: w });
   };
-  const setRetireAge = (v) => set({ retireLinked: false, retireAge: v });
+  const setRetireAge = (v) =>
+    set({ retireLinked: false, retireAge: Math.max(60, v) });
 
   return (
     <div className="card">
@@ -222,15 +224,15 @@ function PersonPanel({ person, onChange, showLabel }) {
           label="גיל נוכחי"
           value={person.currentAge}
           min={18}
-          max={74}
+          max={80}
           onChange={setCurrentAge}
         />
         <div>
           <Slider
             label="גיל הפסקת עבודה"
             value={person.workStopAge}
-            min={45}
-            max={75}
+            min={18}
+            max={80}
             display={formatAge(person.workStopAge)}
             onChange={setWorkStopAge}
           />
@@ -242,8 +244,8 @@ function PersonPanel({ person, onChange, showLabel }) {
           <Slider
             label="גיל פרישה (תחילת משיכת קצבה)"
             value={person.retireAge}
-            min={45}
-            max={75}
+            min={18}
+            max={80}
             display={formatAge(person.retireAge)}
             onChange={setRetireAge}
           />
