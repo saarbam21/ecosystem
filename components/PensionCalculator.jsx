@@ -125,7 +125,7 @@ function Slider({ label, value, min, max, step = 1, suffix = "", display, onChan
   );
 }
 
-function NumField({ label, value, onChange, placeholder, suffix, thousands }) {
+function NumField({ label, value, onChange, placeholder, suffix, thousands, center }) {
   const handle = (e) =>
     onChange(thousands ? formatThousands(e.target.value) : e.target.value);
   return (
@@ -139,7 +139,9 @@ function NumField({ label, value, onChange, placeholder, suffix, thousands }) {
           value={value}
           placeholder={placeholder}
           onChange={handle}
-          className="w-full rounded-lg border border-slate-200 px-3 py-2 text-right text-ink outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
+          className={`w-full rounded-lg border border-slate-200 px-3 py-2 text-ink outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100 ${
+            center ? "text-center" : "text-right"
+          }`}
         />
         {suffix && (
           <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-ink-soft">
@@ -355,6 +357,7 @@ function PersonPanel({ person, onChange, showLabel }) {
             label="מקדם המרה לקצבה"
             value={person.factor}
             placeholder="200"
+            center
             onChange={(v) => set({ factor: v })}
           />
         </div>
@@ -362,7 +365,7 @@ function PersonPanel({ person, onChange, showLabel }) {
 
       {/* Result: pension */}
       <div className="mt-5 rounded-xl border-2 border-brand-200 bg-white p-4 text-center">
-        <p className="text-sm text-ink-soft">קצבה חודשית צפויה (ברוטו)</p>
+        <p className="text-sm text-ink-soft">קצבה חודשית צפויה (ברוטו, לפני מס)</p>
         <p className="mt-1 text-3xl font-extrabold text-brand-700">
           {ILS.format(res.pension)}
         </p>
@@ -440,7 +443,7 @@ export default function PensionCalculator() {
               <p className="text-2xl font-extrabold">{ILS.format(totalAccum)}</p>
             </div>
             <div>
-              <p className="text-sm text-brand-50/90">קצבה חודשית משותפת (ברוטו)</p>
+              <p className="text-sm text-brand-50/90">קצבה חודשית משותפת (ברוטו, לפני מס)</p>
               <p className="text-2xl font-extrabold">
                 {ILS.format(totalPension)}
               </p>
