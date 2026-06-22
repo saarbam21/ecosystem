@@ -832,12 +832,14 @@ export default function NetPensionCalculator() {
               <NumField
                 label="נקודות זיכוי"
                 value={tax.points}
+                asText
                 onChange={(v) => setTax((t) => ({ ...t, points: v }))}
               />
               <NumField
                 label="שווי נקודת זיכוי (חודשי)"
                 value={tax.pointValue}
                 suffix="₪"
+                asText
                 onChange={(v) => setTax((t) => ({ ...t, pointValue: v }))}
               />
             </div>
