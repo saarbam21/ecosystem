@@ -7,6 +7,7 @@ import { nav } from "@/lib/site";
 
 export default function Header() {
   const [open, setOpen] = useState(false);
+  const [openMenu, setOpenMenu] = useState(null);
 
   return (
     <header className="sticky top-0 z-50 border-b border-slate-100 bg-white/90 backdrop-blur">
@@ -18,9 +19,20 @@ export default function Header() {
         <nav aria-label="ניווט ראשי" className="hidden items-center gap-1 md:flex">
           {nav.map((item) =>
             item.children ? (
-              <div key={item.href} className="group relative">
+              <div
+                key={item.href}
+                className="relative"
+                onMouseEnter={() => setOpenMenu(item.href)}
+                onMouseLeave={() => setOpenMenu(null)}
+                onBlur={(e) => {
+                  if (!e.currentTarget.contains(e.relatedTarget)) setOpenMenu(null);
+                }}
+              >
                 <Link
                   href={item.href}
+                  onClick={() => setOpenMenu(null)}
+                  onFocus={() => setOpenMenu(item.href)}
+                  aria-expanded={openMenu === item.href}
                   className="inline-flex items-center gap-1 rounded-full px-4 py-2 text-base font-medium text-ink-soft transition hover:bg-brand-50 hover:text-brand-700"
                 >
                   {item.label}
@@ -33,25 +45,30 @@ export default function Header() {
                     strokeWidth="2.5"
                     strokeLinecap="round"
                     strokeLinejoin="round"
-                    className="transition group-hover:rotate-180"
+                    className={`transition ${
+                      openMenu === item.href ? "rotate-180" : ""
+                    }`}
                     aria-hidden="true"
                   >
                     <polyline points="6 9 12 15 18 9" />
                   </svg>
                 </Link>
-                <div className="invisible absolute right-0 top-full z-50 pt-2 opacity-0 transition group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100">
-                  <div className="min-w-[12rem] rounded-xl border border-slate-100 bg-white p-1 shadow-card">
-                    {item.children.map((c) => (
-                      <Link
-                        key={c.href}
-                        href={c.href}
-                        className="block rounded-lg px-4 py-2.5 text-sm font-medium text-ink-soft transition hover:bg-brand-50 hover:text-brand-700"
-                      >
-                        {c.label}
-                      </Link>
-                    ))}
+                {openMenu === item.href && (
+                  <div className="absolute right-0 top-full z-50 pt-2">
+                    <div className="min-w-[12rem] rounded-xl border border-slate-100 bg-white p-1 shadow-card">
+                      {item.children.map((c) => (
+                        <Link
+                          key={c.href}
+                          href={c.href}
+                          onClick={() => setOpenMenu(null)}
+                          className="block rounded-lg px-4 py-2.5 text-sm font-medium text-ink-soft transition hover:bg-brand-50 hover:text-brand-700"
+                        >
+                          {c.label}
+                        </Link>
+                      ))}
+                    </div>
                   </div>
-                </div>
+                )}
               </div>
             ) : (
               <Link
