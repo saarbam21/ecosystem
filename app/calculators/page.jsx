@@ -3,7 +3,7 @@ import PensionCalculator from "@/components/PensionCalculator";
 import CTA from "@/components/CTA";
 
 export const metadata = {
-  title: "מחשבונים",
+  title: "מחשבון קצבה ופרישה",
   description:
     "מחשבון קצבה ופרישה — חשבו את הצבירה הצפויה והקצבה החודשית ליחיד או לזוג, כולל דמי ניהול, תשואה ומקדם המרה.",
 };
