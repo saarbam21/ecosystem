@@ -331,26 +331,41 @@ export default function NetPensionCalculator() {
       : 0;
 
     // Exempt-capital formula: ceiling × rate × 180 − used, then ÷ 180.
-    // Without rights-fixing (קיבוע זכויות) there is no entitling-pension exemption at all.
     const exemptCapital = EXEMPT_CEILING * (exemptRateAtRetire / 100) * CAPITAL_DIVISOR;
     const remainingCapital = Math.max(0, exemptCapital - offset);
-    const monthlyExemption = kibuaDone ? remainingCapital / CAPITAL_DIVISOR : 0;
+    const monthlyExemption = remainingCapital / CAPITAL_DIVISOR;
+
+    // The entitling-pension exemption requires rights-fixing (קיבוע זכויות),
+    // which is only relevant from the eligibility age (60). Drawing a pension
+    // before 60 → no exemption at all.
+    const ageEligible = num(retireAge) >= 60;
+    const exemptionApplies = kibuaDone && ageEligible;
 
     // The recognized pension is fully exempt and stands aside from the
     // entitling-pension exemption, which applies to the remaining pension.
     const entitlingPension = Math.max(0, grossPension - recognizedPension);
-    const exemptApplied = Math.min(entitlingPension, monthlyExemption);
-    const taxable = Math.max(0, entitlingPension - exemptApplied);
-    const taxBeforeCredits = incomeTaxMonthly(taxable);
     const creditValue = num(tax.points) * num(tax.pointValue);
-    const taxDue = Math.max(0, taxBeforeCredits - creditValue);
-    const net = grossPension - taxDue;
-    const effRate = grossPension > 0 ? taxDue / grossPension : 0;
+
+    const netFor = (exemptCap) => {
+      const exemptApplied = Math.min(entitlingPension, exemptCap);
+      const taxable = Math.max(0, entitlingPension - exemptApplied);
+      const taxBeforeCredits = incomeTaxMonthly(taxable);
+      const taxDue = Math.max(0, taxBeforeCredits - creditValue);
+      const net = grossPension - taxDue;
+      const effRate = grossPension > 0 ? taxDue / grossPension : 0;
+      return { exemptApplied, taxable, taxBeforeCredits, taxDue, net, effRate };
+    };
+
+    const withExemption = netFor(monthlyExemption); // from age 60 (exemption applies)
+    const noExemption = netFor(0); // before 60 / no rights-fixing
+    const actual = exemptionApplies ? withExemption : noExemption;
 
     return {
       lines,
       severanceLines,
       retireYear,
+      ageEligible,
+      exemptionApplies,
       exemptRateAtRetire,
       grossPension,
       recognizedPension,
@@ -359,13 +374,17 @@ export default function NetPensionCalculator() {
       offset,
       remainingCapital,
       monthlyExemption,
-      exemptApplied,
-      taxable,
-      taxBeforeCredits,
       creditValue,
-      taxDue,
-      net,
-      effRate,
+      // actual scenario (drives the breakdown and the headline when eligible)
+      exemptApplied: actual.exemptApplied,
+      taxable: actual.taxable,
+      taxBeforeCredits: actual.taxBeforeCredits,
+      taxDue: actual.taxDue,
+      net: actual.net,
+      effRate: actual.effRate,
+      // comparison amounts for early (before-60) retirement
+      netWith: withExemption.net,
+      netWithout: noExemption.net,
     };
   }, [
     portfolios,
@@ -421,13 +440,15 @@ export default function NetPensionCalculator() {
             <Slider
               label="גיל תחילת משיכת קצבה"
               value={retireAge}
-              min={Math.max(60, currentAge)}
+              min={currentAge}
               max={80}
               display={formatAge(retireAge)}
               onChange={setRetireAge}
             />
             <p className="mt-1 text-xs text-ink-soft">
               שנת פרישה משוערת: {result.retireYear}.
+              {!result.ageEligible &&
+                " משיכת קצבה לפני גיל 60 — ללא פטור על הקצבה המזכה."}
             </p>
           </div>
         </div>
@@ -629,16 +650,43 @@ export default function NetPensionCalculator() {
           )}
         </div>
 
-        <div className="rounded-2xl border-2 border-brand-200 bg-white p-5 text-center">
-          <p className="text-sm text-ink-soft">קצבה חודשית נטו (אחרי מס)</p>
-          <p className="mt-1 text-4xl font-extrabold text-brand-700">
-            {ILS.format(result.net)}
-          </p>
-          <p className="mt-2 text-xs text-ink-soft">
-            מתוך ברוטו {ILS.format(result.grossPension)} · שיעור מס אפקטיבי{" "}
-            {(result.effRate * 100).toFixed(1)}%
-          </p>
-        </div>
+        {result.ageEligible ? (
+          <div className="rounded-2xl border-2 border-brand-200 bg-white p-5 text-center">
+            <p className="text-sm text-ink-soft">קצבה חודשית נטו (אחרי מס)</p>
+            <p className="mt-1 text-4xl font-extrabold text-brand-700">
+              {ILS.format(result.net)}
+            </p>
+            <p className="mt-2 text-xs text-ink-soft">
+              מתוך ברוטו {ILS.format(result.grossPension)} · שיעור מס אפקטיבי{" "}
+              {(result.effRate * 100).toFixed(1)}%
+            </p>
+          </div>
+        ) : (
+          <div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="rounded-2xl border-2 border-brand-300 bg-white p-5 text-center">
+                <p className="text-sm font-semibold text-ink">
+                  פרישה לפני גיל 60
+                </p>
+                <p className="text-xs text-ink-soft">ללא פטור על הקצבה המזכה</p>
+                <p className="mt-2 text-3xl font-extrabold text-brand-700">
+                  {ILS.format(result.netWithout)}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5 text-center">
+                <p className="text-sm font-semibold text-ink">מגיל 60 ואילך</p>
+                <p className="text-xs text-ink-soft">עם פטור על הקצבה המזכה</p>
+                <p className="mt-2 text-3xl font-extrabold text-ink">
+                  {ILS.format(result.netWith)}
+                </p>
+              </div>
+            </div>
+            <p className="mt-3 rounded-xl bg-amber-50 p-3 text-center text-xs font-medium text-amber-800">
+              משיכת קצבה לפני גיל 60 — אין פטור על הקצבה המזכה. ההפרש לעומת פרישה
+              מגיל 60: {ILS.format(result.netWith - result.netWithout)} לחודש.
+            </p>
+          </div>
+        )}
 
         {/* Breakdown (hidden by default) */}
         <div className="mt-5 rounded-xl border border-slate-100">
@@ -689,7 +737,16 @@ export default function NetPensionCalculator() {
             <span className="text-ink-soft">{showExemptDetail ? "−" : "+"}</span>
           </button>
           {showExemptDetail &&
-            (kibuaDone ? (
+            (!result.ageEligible ? (
+              <p className="border-t border-slate-100 px-4 py-3 text-sm text-amber-700">
+                משיכת קצבה לפני גיל 60 — אין פטור על הקצבה המזכה (קיבוע זכויות חל
+                מגיל הזכאות, 60).
+              </p>
+            ) : !kibuaDone ? (
+              <p className="border-t border-slate-100 px-4 py-3 text-sm text-amber-700">
+                לא בוצע קיבוע זכויות — אין כלל פטור על הקצבה המזכה.
+              </p>
+            ) : (
               <dl className="divide-y divide-slate-100 border-t border-slate-100 text-sm">
                 <Row
                   label={`שיעור הפטור בפרישה (${result.retireYear})`}
@@ -713,10 +770,6 @@ export default function NetPensionCalculator() {
                   strong
                 />
               </dl>
-            ) : (
-              <p className="border-t border-slate-100 px-4 py-3 text-sm text-amber-700">
-                לא בוצע קיבוע זכויות — אין כלל פטור על הקצבה המזכה.
-              </p>
             ))}
         </div>
 
