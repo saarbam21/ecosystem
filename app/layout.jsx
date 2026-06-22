@@ -34,9 +34,6 @@ export const metadata = {
     locale: "he_IL",
     type: "website",
   },
-  alternates: {
-    canonical: site.url,
-  },
 };
 
 export default function RootLayout({ children }) {
