@@ -470,10 +470,10 @@ export default function NetPensionCalculator() {
               onChange={setRetireAge}
             />
             <p className="mt-1 text-xs text-ink-soft">
-              שנת פרישה משוערת: {result.retireYear}. גיל פרישה ע״פי חוק:{" "}
+              שנת פרישה משוערת: {result.retireYear}. גיל פרישה עפ״י חוק:{" "}
               {formatAge(result.legalAge)}.
               {!result.ageEligible &&
-                " משיכה לפני גיל הפרישה ע״פי חוק — ללא פטור על הקצבה המזכה."}
+                " משיכה לפני גיל הפרישה עפ״י חוק — ללא פטור על הקצבה המזכה."}
             </p>
           </div>
         </div>
@@ -691,7 +691,7 @@ export default function NetPensionCalculator() {
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="rounded-2xl border-2 border-brand-300 bg-white p-5 text-center">
                 <p className="text-sm font-semibold text-ink">
-                  מגיל הפרישה ע״פי חוק ({formatAge(result.legalAge)}) ואילך
+                  מגיל {formatAge(result.legalAge)}
                 </p>
                 <p className="text-xs text-ink-soft">עם פטור על הקצבה המזכה</p>
                 <p className="mt-2 text-3xl font-extrabold text-brand-700">
@@ -700,7 +700,7 @@ export default function NetPensionCalculator() {
               </div>
               <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5 text-center">
                 <p className="text-sm font-semibold text-ink">
-                  פרישה לפני גיל הפרישה ע״פי חוק
+                  עד גיל {formatAge(result.legalAge)}
                 </p>
                 <p className="text-xs text-ink-soft">ללא פטור על הקצבה המזכה</p>
                 <p className="mt-2 text-3xl font-extrabold text-ink">
@@ -709,8 +709,8 @@ export default function NetPensionCalculator() {
               </div>
             </div>
             <p className="mt-3 rounded-xl bg-amber-50 p-3 text-center text-xs font-medium text-amber-800">
-              משיכת קצבה לפני גיל הפרישה ע״פי חוק ({formatAge(result.legalAge)}) —
-              אין פטור על הקצבה המזכה. ההפרש לעומת פרישה בגיל ע״פי חוק:{" "}
+              משיכת קצבה לפני גיל הפרישה עפ״י חוק ({formatAge(result.legalAge)}) —
+              אין פטור על הקצבה המזכה. ההפרש לעומת פרישה בגיל עפ״י חוק:{" "}
               {ILS.format(result.netWith - result.netWithout)} לחודש.
             </p>
           </div>
@@ -723,7 +723,7 @@ export default function NetPensionCalculator() {
             onClick={() => setShowNetDetail((v) => !v)}
             className="flex w-full items-center justify-between px-4 py-3 text-sm font-semibold text-ink"
           >
-            <span>פירוט חישוב הנטו (מגיל פרישה ע״פי חוק)</span>
+            <span>פירוט חישוב הנטו (מגיל פרישה עפ״י חוק)</span>
             <span className="text-ink-soft">{showNetDetail ? "−" : "+"}</span>
           </button>
           {showNetDetail && (
