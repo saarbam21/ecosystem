@@ -348,9 +348,8 @@ export default function NetPensionCalculator() {
       const used = exemptByTransition ? 0 : indexed * SEVERANCE_FACTOR;
       return { id: s.id, amount, wy, indexed, used, exemptByTransition };
     });
-    const offset = applyOffset
-      ? severanceLines.reduce((s, l) => s + l.used, 0)
-      : 0;
+    const severanceUsedTotal = severanceLines.reduce((s, l) => s + l.used, 0);
+    const offset = applyOffset ? severanceUsedTotal : 0;
 
     // Exempt-capital formula: ceiling × rate × 180 − used, then ÷ 180.
     const exemptCapital = EXEMPT_CEILING * (exemptRateAtRetire / 100) * CAPITAL_DIVISOR;
@@ -388,6 +387,7 @@ export default function NetPensionCalculator() {
     return {
       lines,
       severanceLines,
+      severanceUsedTotal,
       retireYear,
       legalAge,
       ageEligible,
@@ -662,6 +662,16 @@ export default function NetPensionCalculator() {
                   );
                 })}
               </div>
+              {severances.length > 1 && (
+                <div className="mt-3 flex items-center justify-between border-t border-slate-200 pt-3">
+                  <span className="text-sm font-semibold text-ink">
+                    סה״כ הפגיעה בפטור
+                  </span>
+                  <span dir="rtl" className="text-sm font-extrabold text-brand-700">
+                    {ILS.format(result.severanceUsedTotal)}
+                  </span>
+                </div>
+              )}
               <p className="mt-3 text-xs text-ink-soft">
                 סכום הפגיעה בפטור = הסכום שנמשך × {SEVERANCE_FACTOR}, ממודד ממועד
                 המשיכה ועד היום לפי מדד המחירים לצרכן.
