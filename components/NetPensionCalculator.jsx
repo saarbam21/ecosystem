@@ -663,12 +663,21 @@ export default function NetPensionCalculator() {
                 })}
               </div>
               {severances.length > 1 && (
-                <div className="mt-3 flex items-center justify-between border-t border-slate-200 pt-3">
-                  <span className="text-sm font-semibold text-ink">
+                <div className="mt-3 grid items-center gap-3 border-t border-slate-200 pt-3 sm:grid-cols-[1fr,6rem,1fr,auto]">
+                  <span className="text-sm font-semibold text-ink sm:col-span-2">
                     סה״כ הפגיעה בפטור
                   </span>
-                  <span dir="rtl" className="text-sm font-extrabold text-brand-700">
+                  <div
+                    dir="rtl"
+                    className="px-3 py-2 text-right font-extrabold text-brand-700"
+                  >
                     {ILS.format(result.severanceUsedTotal)}
+                  </div>
+                  <span
+                    aria-hidden="true"
+                    className="hidden px-2 py-2 text-sm invisible sm:inline-block"
+                  >
+                    הסרה
                   </span>
                 </div>
               )}
