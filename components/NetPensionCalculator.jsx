@@ -689,15 +689,6 @@ export default function NetPensionCalculator() {
         ) : (
           <div>
             <div className="grid gap-4 sm:grid-cols-2">
-              <div className="rounded-2xl border-2 border-brand-300 bg-white p-5 text-center">
-                <p className="text-sm font-semibold text-ink">
-                  מגיל {formatAge(result.legalAge)}
-                </p>
-                <p className="text-xs text-ink-soft">עם פטור על הקצבה המזכה</p>
-                <p className="mt-2 text-3xl font-extrabold text-brand-700">
-                  {ILS.format(result.netWith)}
-                </p>
-              </div>
               <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5 text-center">
                 <p className="text-sm font-semibold text-ink">
                   עד גיל {formatAge(result.legalAge)}
@@ -705,6 +696,15 @@ export default function NetPensionCalculator() {
                 <p className="text-xs text-ink-soft">ללא פטור על הקצבה המזכה</p>
                 <p className="mt-2 text-3xl font-extrabold text-ink">
                   {ILS.format(result.netWithout)}
+                </p>
+              </div>
+              <div className="rounded-2xl border-2 border-brand-300 bg-white p-5 text-center">
+                <p className="text-sm font-semibold text-ink">
+                  מגיל {formatAge(result.legalAge)}
+                </p>
+                <p className="text-xs text-ink-soft">עם פטור על הקצבה המזכה</p>
+                <p className="mt-2 text-3xl font-extrabold text-brand-700">
+                  {ILS.format(result.netWith)}
                 </p>
               </div>
             </div>
