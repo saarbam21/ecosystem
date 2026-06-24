@@ -12,7 +12,9 @@ const ILS = new Intl.NumberFormat("he-IL", {
 // the ₪ sign stays to the left (matching the headline net figure).
 const ILSminus = (x) => (Math.abs(x) < 0.5 ? ILS.format(0) : ILS.format(-Math.abs(x)));
 
-const CURRENT_YEAR = new Date().getFullYear();
+const NOW = new Date();
+const CURRENT_YEAR = NOW.getFullYear();
+const CURRENT_MONTH_KEY = `${CURRENT_YEAR}-${String(NOW.getMonth() + 1).padStart(2, "0")}`;
 
 // Severance "use up" multiplier and the statutory divisor used in the
 // exempt-capital formula (תיקון 190 / קיבוע זכויות).
@@ -22,59 +24,111 @@ const CAPITAL_DIVISOR = 180; // 180 months = 15 years
 // ===================================================================
 // ערכים הקבועים בחוק — ערוך כאן ידנית אם החקיקה משתנה.
 // ===================================================================
-// תקרת קצבה מזכה (חודשי):
-const EXEMPT_CEILING = 9430;
+// תקרת קצבה מזכה ושיעור הפטור לפי שנת הזכאות (שנת הגעה לגיל פרישה).
+const EXEMPT_BY_YEAR = {
+  2012: { ceiling: 8190, rate: 43.5 },
+  2013: { ceiling: 8310, rate: 43.5 },
+  2014: { ceiling: 8470, rate: 43.5 },
+  2015: { ceiling: 8460, rate: 43.5 },
+  2016: { ceiling: 8380, rate: 49 },
+  2017: { ceiling: 8360, rate: 49 },
+  2018: { ceiling: 8380, rate: 49 },
+  2019: { ceiling: 8480, rate: 49 },
+  2020: { ceiling: 8510, rate: 52 },
+  2021: { ceiling: 8460, rate: 52 },
+  2022: { ceiling: 8660, rate: 52 },
+  2023: { ceiling: 9120, rate: 52 },
+  2024: { ceiling: 9430, rate: 52 },
+  2025: { ceiling: 9430, rate: 57 },
+  2026: { ceiling: 9430, rate: 58 },
+};
+const EXEMPT_YEAR_MIN = 2012;
+const EXEMPT_YEAR_MAX = 2026;
 
-// שיעור הפטור על הקצבה המזכה לפי שנת הפרישה (%):
-function exemptRateForYear(year) {
-  if (year <= 2026) return 57.5;
-  if (year === 2027) return 62.5;
-  return 67; // 2028 ואילך
+// שיעור/תקרה לפי שנת הזכאות. לפני 2012 — 35%. אחרי הטבלה — לפי השנה האחרונה הידועה.
+function exemptForYear(year) {
+  const y = Math.round(year);
+  if (y < EXEMPT_YEAR_MIN) return { ceiling: 8190, rate: 35 };
+  if (y > EXEMPT_YEAR_MAX) return EXEMPT_BY_YEAR[EXEMPT_YEAR_MAX];
+  return EXEMPT_BY_YEAR[y];
 }
 
+// ניצול הפיצויים הפטורים מוגבל ל-35% × תקרת הפטור × 180.
+const SEVERANCE_OFFSET_CAP_RATE = 0.35;
+// מעבר ל-32 שנות עבודה נלקח לקיזוז רק החלק היחסי של 32 מתוך סך השנים.
+const SEVERANCE_YEARS_CAP = 32;
+
 // הוראת מעבר: פיצויים פטורים שנמשכו לפני שנה זו, וחלפו מאז לפחות
-// מספר השנים שלהלן ועד הפרישה — אינם פוגעים בפטור.
+// מספר השנים שלהלן ועד שנת הזכאות — אינם פוגעים בפטור.
 const TRANSITION_BEFORE_YEAR = 2012;
 const TRANSITION_YEARS = 15;
 // ===================================================================
 
-// Israeli CPI (מדד המחירים לצרכן), base 2006 = 100. Source: dekel.co.il.
-// Used for actual historical indexation of severance. Each value is the
-// December index of the year; the last year is the latest published month.
-const CPI = {
-  2007: 102.5,
-  2008: 102.5,
-  2009: 106.4,
-  2010: 113.5,
-  2011: 115.97,
-  2012: 117.87,
-  2013: 120.01,
-  2014: 119.77,
-  2015: 118.58,
-  2016: 118.34,
-  2017: 118.81,
-  2018: 119.76,
-  2019: 120.48,
-  2020: 119.64,
-  2021: 122.99,
-  2022: 129.47,
-  2023: 133.3,
-  2024: 137.62,
-  2025: 141.257,
-  2026: 142.894, // latest published month (May 2026)
+// Israeli CPI (מדד המחירים לצרכן), base 2006 = 100, monthly. Source: dekel.co.il.
+// Used for actual historical indexation of severance grants by withdrawal month.
+const CPI_MONTHLY = {
+  "2012-01": 115.9715, "2012-02": 115.9715, "2012-03": 116.4176, "2012-04": 117.4212,
+  "2012-05": 117.4212, "2012-06": 117.0867, "2012-07": 117.1982, "2012-08": 118.4248,
+  "2012-09": 118.4248, "2012-10": 118.2018, "2012-11": 117.6442, "2012-12": 117.8672,
+  "2013-01": 117.6616, "2013-02": 117.6616, "2013-03": 117.8962, "2013-04": 118.3655,
+  "2013-05": 118.4828, "2013-06": 119.4213, "2013-07": 119.7732, "2013-08": 120.0078,
+  "2013-09": 120.0078, "2013-10": 120.3597, "2013-11": 119.8905, "2013-12": 120.0078,
+  "2014-01": 119.3039, "2014-02": 119.0693, "2014-03": 119.4213, "2014-04": 119.5386,
+  "2014-05": 119.6559, "2014-06": 120.0078, "2014-07": 120.1251, "2014-08": 120.0078,
+  "2014-09": 119.6559, "2014-10": 120.0078, "2014-11": 119.7732, "2014-12": 119.7732,
+  "2015-01": 118.6986, "2015-02": 117.861, "2015-03": 118.22, "2015-04": 118.9379,
+  "2015-05": 119.1772, "2015-06": 119.5362, "2015-07": 119.7755, "2015-08": 119.5362,
+  "2015-09": 119.0576, "2015-10": 119.1772, "2015-11": 118.6986, "2015-12": 118.579,
+  "2016-01": 117.9807, "2016-02": 117.6217, "2016-03": 117.3824, "2016-04": 117.861,
+  "2016-05": 118.22, "2016-06": 118.579, "2016-07": 119.0576, "2016-08": 118.6986,
+  "2016-09": 118.579, "2016-10": 118.8183, "2016-11": 118.3397, "2016-12": 118.3397,
+  "2017-01": 118.103, "2017-02": 118.103, "2017-03": 118.458, "2017-04": 118.6947,
+  "2017-05": 119.168, "2017-06": 118.3397, "2017-07": 118.2213, "2017-08": 118.5763,
+  "2017-09": 118.6947, "2017-10": 119.0497, "2017-11": 118.6947, "2017-12": 118.813,
+  "2018-01": 118.2213, "2018-02": 118.3397, "2018-03": 118.6947, "2018-04": 119.168,
+  "2018-05": 119.7597, "2018-06": 119.8781, "2018-07": 119.8781, "2018-08": 119.9964,
+  "2018-09": 120.1148, "2018-10": 120.4698, "2018-11": 120.1148, "2018-12": 119.7597,
+  "2019-01": 119.6426, "2019-02": 119.7621, "2019-03": 120.3597, "2019-04": 120.7183,
+  "2019-05": 121.5549, "2019-06": 120.8378, "2019-07": 120.4792, "2019-08": 120.7183,
+  "2019-09": 120.4792, "2019-10": 120.9573, "2019-11": 120.4792, "2019-12": 120.4792,
+  "2020-01": 120.0011, "2020-02": 119.8816, "2020-03": 120.3597, "2020-04": 120.0011,
+  "2020-05": 119.6426, "2020-06": 119.5231, "2020-07": 119.7621, "2020-08": 119.7621,
+  "2020-09": 119.6426, "2020-10": 120.0011, "2020-11": 119.7621, "2020-12": 119.6426,
+  "2021-01": 119.522, "2021-02": 119.8816, "2021-03": 120.6009, "2021-04": 120.9606,
+  "2021-05": 121.4401, "2021-06": 121.56, "2021-07": 122.0395, "2021-08": 122.3991,
+  "2021-09": 122.6389, "2021-10": 122.7588, "2021-11": 122.6389, "2021-12": 122.9985,
+  "2022-01": 123.2383, "2022-02": 124.0775, "2022-03": 124.7968, "2022-04": 125.7558,
+  "2022-05": 126.4751, "2022-06": 126.9546, "2022-07": 128.3932, "2022-08": 128.0336,
+  "2022-09": 128.2733, "2022-10": 128.9926, "2022-11": 129.1125, "2022-12": 129.4722,
+  "2023-01": 129.8746, "2023-02": 130.5094, "2023-03": 131.0172, "2023-04": 132.0328,
+  "2023-05": 132.2867, "2023-06": 132.2867, "2023-07": 132.6676, "2023-08": 133.302,
+  "2023-09": 133.1754, "2023-10": 133.8102, "2023-11": 133.4293, "2023-12": 133.3024,
+  "2024-01": 133.3024, "2024-02": 133.8102, "2024-03": 134.5719, "2024-04": 135.7145,
+  "2024-05": 135.9684, "2024-06": 136.0954, "2024-07": 136.8571, "2024-08": 138.1266,
+  "2024-09": 137.8727, "2024-10": 138.5075, "2024-11": 137.9997, "2024-12": 137.6188,
+  "2025-01": 138.3945, "2025-02": 138.3945, "2025-03": 139.076, "2025-04": 140.576,
+  "2025-05": 140.167, "2025-06": 140.5761, "2025-07": 141.121, "2025-08": 142.076,
+  "2025-09": 141.2579, "2025-10": 141.9396, "2025-11": 141.257, "2025-12": 141.257,
+  "2026-01": 140.8488, "2026-02": 141.1215, "2026-03": 141.6669, "2026-04": 143.303,
+  "2026-05": 142.894,
 };
-const CPI_FIRST = 2007;
-const CPI_LAST = 2026;
+const CPI_MONTH_KEYS = Object.keys(CPI_MONTHLY);
+const CPI_FIRST_MONTH = CPI_MONTH_KEYS[0];
+const CPI_LATEST_KEY = CPI_MONTH_KEYS[CPI_MONTH_KEYS.length - 1];
+const CPI_LATEST = CPI_MONTHLY[CPI_LATEST_KEY];
 
-// Actual CPI level for a year, clamped to the table range. Severance is indexed
-// from the withdrawal year up to today (the latest known index) only — no
-// forward projection to retirement (future inflation would also raise the
-// exempt ceiling, so it is intentionally left out).
-function cpiAt(year) {
-  const y = Math.round(year);
-  if (y <= CPI_FIRST) return CPI[CPI_FIRST];
-  if (y >= CPI_LAST) return CPI[CPI_LAST];
-  return CPI[y];
+// Index level for a "YYYY-MM" month, clamped to the known range. Severance is
+// indexed up to the latest known index only — no forward projection.
+function cpiAtMonth(monthKey) {
+  if (CPI_MONTHLY[monthKey] != null) return CPI_MONTHLY[monthKey];
+  if (!monthKey || monthKey < CPI_FIRST_MONTH) return CPI_MONTHLY[CPI_FIRST_MONTH];
+  if (monthKey > CPI_LATEST_KEY) return CPI_LATEST;
+  let v = CPI_MONTHLY[CPI_FIRST_MONTH];
+  for (const k of CPI_MONTH_KEYS) {
+    if (k <= monthKey) v = CPI_MONTHLY[k];
+    else break;
+  }
+  return v;
 }
 
 function num(v) {
@@ -112,9 +166,8 @@ const WOMEN_RETIREMENT_BY_BIRTH_YEAR = {
   1969: 64 + 9 / 12,
 };
 
-function legalRetirementAge(gender, currentAge) {
+function legalRetirementAge(gender, birthYear) {
   if (gender === "male") return 67;
-  const birthYear = CURRENT_YEAR - Math.round(num(currentAge));
   if (birthYear <= 1959) return 62;
   if (birthYear >= 1970) return 65;
   return WOMEN_RETIREMENT_BY_BIRTH_YEAR[birthYear] ?? 65;
@@ -164,7 +217,8 @@ let sid = 0;
 const newSeverance = () => ({
   id: ++sid,
   amount: "",
-  year: String(CURRENT_YEAR),
+  month: CURRENT_MONTH_KEY, // YYYY-MM
+  yearsWorked: "", // שנות עבודה במקום העבודה (ריק = כל הסכום פוגע בפטור)
 });
 
 // ----- shared field components -----
@@ -223,12 +277,10 @@ function Slider({ label, value, min, max, step = 1, suffix = "", display, onChan
   );
 }
 
-function Row({ label, value, strong, muted }) {
+function Row({ label, value, strong }) {
   return (
     <div className="flex items-center justify-between px-4 py-2.5">
-      <dt className={strong ? "font-bold text-ink" : muted ? "text-ink-soft" : "text-ink-soft"}>
-        {label}
-      </dt>
+      <dt className={strong ? "font-bold text-ink" : "text-ink-soft"}>{label}</dt>
       <dd
         dir="rtl"
         className={strong ? "font-extrabold text-brand-700" : "font-semibold text-ink"}
@@ -310,11 +362,13 @@ export default function NetPensionCalculator() {
 
   // ----- calculation -----
   const result = useMemo(() => {
-    const yearsToRetire = Math.max(0, num(retireAge) - num(currentAge));
-    const retireYear = CURRENT_YEAR + yearsToRetire;
+    // Eligibility year = the calendar year the person reaches the legal age.
+    const birthYear = CURRENT_YEAR - Math.round(num(currentAge));
+    const legalAge = legalRetirementAge(gender, birthYear);
+    const eligibilityYear = Math.round(birthYear + legalAge);
 
-    // Exemption rate per the statutory schedule for the retirement year.
-    const exemptRateAtRetire = exemptRateForYear(retireYear);
+    // Ceiling + exempt rate always taken at the eligibility year.
+    const { ceiling: exemptCeiling, rate: exemptRate } = exemptForYear(eligibilityYear);
 
     // Portfolios → gross pension + recognized (tax-free) pension.
     const lines = portfolios.map((p) => {
@@ -332,39 +386,53 @@ export default function NetPensionCalculator() {
     const grossPension = lines.reduce((s, l) => s + l.gross, 0);
     const recognizedPension = lines.reduce((s, l) => s + l.recognizedPension, 0);
 
-    // Exempt severance "used up", indexed from the withdrawal year up to today.
-    // Each withdrawal: amount × index(withdrawal→today) × 1.35.
-    // Transitional relief: withdrawn before 2012 and ≥15 years to retirement → no impact.
+    // Exempt severance "used up": amount × 1.35, indexed by CPI from the
+    // withdrawal month up to today, and — if more than 32 years were worked —
+    // only the proportional 32/years share counts toward the offset.
     const applyOffset = kibuaDone && severanceWithdrawn;
-    const idxToday = cpiAt(CPI_LAST);
+    const idxToday = CPI_LATEST;
     const severanceLines = severances.map((s) => {
       const amount = num(s.amount);
-      const wy = num(s.year) || CURRENT_YEAR;
-      const idxAtWithdraw = cpiAt(wy);
+      const monthKey = s.month || CURRENT_MONTH_KEY;
+      const wy = parseInt(monthKey.slice(0, 4), 10) || CURRENT_YEAR;
+      const idxAtWithdraw = cpiAtMonth(monthKey);
       const indexFactor = idxAtWithdraw > 0 ? idxToday / idxAtWithdraw : 1;
       const indexed = amount * indexFactor;
+      const grossUsed = indexed * SEVERANCE_FACTOR;
+      const yearsWorked = num(s.yearsWorked);
+      const propFactor =
+        yearsWorked > SEVERANCE_YEARS_CAP ? SEVERANCE_YEARS_CAP / yearsWorked : 1;
       const exemptByTransition =
-        wy < TRANSITION_BEFORE_YEAR && retireYear - wy >= TRANSITION_YEARS;
-      const used = exemptByTransition ? 0 : indexed * SEVERANCE_FACTOR;
-      return { id: s.id, amount, wy, indexed, used, exemptByTransition };
+        wy < TRANSITION_BEFORE_YEAR && eligibilityYear - wy >= TRANSITION_YEARS;
+      const used = exemptByTransition ? 0 : grossUsed * propFactor;
+      return {
+        id: s.id,
+        amount,
+        monthKey,
+        idxAtWithdraw,
+        indexFactor,
+        indexed,
+        yearsWorked,
+        propFactor,
+        grossUsed,
+        used,
+        exemptByTransition,
+      };
     });
-    const severanceUsedTotal = severanceLines.reduce((s, l) => s + l.used, 0);
-    const offset = applyOffset ? severanceUsedTotal : 0;
+    const severanceUsedRaw = severanceLines.reduce((s, l) => s + l.used, 0);
 
-    // Exempt-capital formula: ceiling × rate × 180 − used, then ÷ 180.
-    const exemptCapital = EXEMPT_CEILING * (exemptRateAtRetire / 100) * CAPITAL_DIVISOR;
+    // Exempt-capital formula and the 35% cap on the severance offset.
+    const exemptCapital = exemptCeiling * (exemptRate / 100) * CAPITAL_DIVISOR;
+    const offsetCap = SEVERANCE_OFFSET_CAP_RATE * exemptCeiling * CAPITAL_DIVISOR;
+    const severanceUsedTotal = Math.min(severanceUsedRaw, offsetCap);
+    const offsetIsCapped = severanceUsedRaw > offsetCap + 0.5;
+    const offset = applyOffset ? severanceUsedTotal : 0;
     const remainingCapital = Math.max(0, exemptCapital - offset);
     const monthlyExemption = remainingCapital / CAPITAL_DIVISOR;
 
-    // The entitling-pension exemption requires rights-fixing (קיבוע זכויות),
-    // which is only possible from the legal retirement age. Drawing a pension
-    // earlier (from 60 up to the legal age) → no exemption at all.
-    const legalAge = legalRetirementAge(gender, currentAge);
+    // The entitling-pension exemption requires rights-fixing and is only
+    // possible from the legal retirement age; drawing earlier → no exemption.
     const ageEligible = num(retireAge) >= legalAge;
-    const exemptionApplies = kibuaDone && ageEligible;
-
-    // The recognized pension is fully exempt and stands aside from the
-    // entitling-pension exemption, which applies to the remaining pension.
     const entitlingPension = Math.max(0, grossPension - recognizedPension);
     const creditValue = num(tax.points) * num(tax.pointValue);
 
@@ -378,8 +446,6 @@ export default function NetPensionCalculator() {
       return { exemptApplied, taxable, taxBeforeCredits, taxDue, net, effRate };
     };
 
-    // "With exemption" = retiring at/after the legal age (exemption requires
-    // rights-fixing). "No exemption" = drawing earlier, between 60 and the legal age.
     const withExemption = netFor(kibuaDone ? monthlyExemption : 0);
     const noExemption = netFor(0);
     const actual = ageEligible ? withExemption : noExemption;
@@ -387,25 +453,28 @@ export default function NetPensionCalculator() {
     return {
       lines,
       severanceLines,
+      severanceUsedRaw,
       severanceUsedTotal,
-      retireYear,
+      offsetCap,
+      offsetIsCapped,
+      birthYear,
+      eligibilityYear,
       legalAge,
       ageEligible,
-      exemptionApplies,
-      exemptRateAtRetire,
-      grossPension,
-      recognizedPension,
-      entitlingPension,
+      exemptCeiling,
+      exemptRate,
       exemptCapital,
       offset,
       remainingCapital,
       monthlyExemption,
+      idxToday,
+      grossPension,
+      recognizedPension,
+      entitlingPension,
       creditValue,
       net: actual.net,
       effRate: actual.effRate,
-      // The net breakdown always reflects retirement at/after the legal age.
       detail: withExemption,
-      // headline amounts: green = after legal age (with exemption), black = before
       netWith: withExemption.net,
       netWithout: noExemption.net,
     };
@@ -450,16 +519,22 @@ export default function NetPensionCalculator() {
         </div>
 
         <div className="grid gap-6 sm:grid-cols-2">
-          <Slider
-            label="גיל נוכחי"
-            value={currentAge}
-            min={18}
-            max={80}
-            onChange={(v) => {
-              setCurrentAge(v);
-              if (v > retireAge) setRetireAge(v);
-            }}
-          />
+          <div>
+            <Slider
+              label="גיל נוכחי"
+              value={currentAge}
+              min={18}
+              max={80}
+              onChange={(v) => {
+                setCurrentAge(v);
+                if (v > retireAge) setRetireAge(v);
+              }}
+            />
+            <p className="mt-1 text-xs text-ink-soft">
+              שנת לידה: {result.birthYear} · שנת זכאות (גיל{" "}
+              {formatAge(result.legalAge)}): {result.eligibilityYear}.
+            </p>
+          </div>
           <div>
             <Slider
               label="גיל תחילת משיכת קצבה"
@@ -470,10 +545,9 @@ export default function NetPensionCalculator() {
               onChange={setRetireAge}
             />
             <p className="mt-1 text-xs text-ink-soft">
-              שנת פרישה משוערת: {result.retireYear}. גיל פרישה עפ״י חוק:{" "}
-              {formatAge(result.legalAge)}.
+              גיל פרישה עפ״י חוק: {formatAge(result.legalAge)}.
               {!result.ageEligible &&
-                " משיכה לפני גיל הפרישה עפ״י חוק — ללא פטור על הקצבה המזכה."}
+                " משיכה לפני גיל זה — ללא פטור על הקצבה המזכה."}
             </p>
           </div>
         </div>
@@ -611,7 +685,7 @@ export default function NetPensionCalculator() {
                   return (
                     <div
                       key={s.id}
-                      className="grid items-end gap-3 sm:grid-cols-[1fr,6rem,1fr,auto]"
+                      className="grid items-end gap-3 sm:grid-cols-[1fr,9rem,6rem,1fr,auto]"
                     >
                       <NumField
                         label={idx === 0 ? "סכום שנמשך" : undefined}
@@ -621,12 +695,30 @@ export default function NetPensionCalculator() {
                         thousands
                         onChange={(v) => setSeverance(s.id, { amount: v })}
                       />
+                      <div>
+                        {idx === 0 && (
+                          <label className="mb-1 block text-sm font-medium text-ink">
+                            חודש משיכה
+                          </label>
+                        )}
+                        <input
+                          type="month"
+                          dir="ltr"
+                          value={s.month}
+                          min={CPI_FIRST_MONTH}
+                          max={CURRENT_MONTH_KEY}
+                          onChange={(e) =>
+                            setSeverance(s.id, { month: e.target.value })
+                          }
+                          className="w-full rounded-lg border border-slate-200 px-3 py-2 text-ink outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
+                        />
+                      </div>
                       <NumField
-                        label={idx === 0 ? "שנת משיכה" : undefined}
-                        value={s.year}
-                        placeholder={String(CURRENT_YEAR)}
+                        label={idx === 0 ? "שנות עבודה" : undefined}
+                        value={s.yearsWorked}
+                        placeholder="—"
                         asText
-                        onChange={(v) => setSeverance(s.id, { year: v })}
+                        onChange={(v) => setSeverance(s.id, { yearsWorked: v })}
                       />
                       <div>
                         {idx === 0 && (
@@ -663,8 +755,8 @@ export default function NetPensionCalculator() {
                 })}
               </div>
               {severances.length > 1 && (
-                <div className="mt-3 grid items-center gap-3 border-t border-slate-200 pt-3 sm:grid-cols-[1fr,6rem,1fr,auto]">
-                  <span className="text-sm font-semibold text-ink sm:col-span-2">
+                <div className="mt-3 grid items-center gap-3 border-t border-slate-200 pt-3 sm:grid-cols-[1fr,9rem,6rem,1fr,auto]">
+                  <span className="text-sm font-semibold text-ink sm:col-span-3">
                     סה״כ הפגיעה בפטור
                   </span>
                   <div
@@ -682,9 +774,17 @@ export default function NetPensionCalculator() {
                 </div>
               )}
               <p className="mt-3 text-xs text-ink-soft">
-                סכום הפגיעה בפטור = הסכום שנמשך × {SEVERANCE_FACTOR}, ממודד ממועד
-                המשיכה ועד היום לפי מדד המחירים לצרכן.
+                סכום הפגיעה = הסכום שנמשך × {SEVERANCE_FACTOR}, ממודד לפי מדד
+                המחירים לצרכן מחודש המשיכה ועד היום. אם שנות העבודה עולות על{" "}
+                {SEVERANCE_YEARS_CAP} — נלקח החלק היחסי בלבד. סך הקיזוז מוגבל ל-35%
+                מתקרת הפטור × 180.
               </p>
+              {result.offsetIsCapped && (
+                <p className="mt-2 text-xs font-medium text-amber-700">
+                  הקיזוז הוגבל לתקרה (35% × תקרת פטור × 180 ={" "}
+                  {ILS.format(result.offsetCap)}).
+                </p>
+              )}
               {!kibuaDone && (
                 <p className="mt-2 text-xs font-medium text-amber-700">
                   לא סומן "בוצע קיבוע זכויות" — לכן אין כלל פטור על הקצבה המזכה.
@@ -784,14 +884,14 @@ export default function NetPensionCalculator() {
           )}
         </div>
 
-        {/* Exemption derivation */}
+        {/* Exact exemption calculation, including the CPI figures used */}
         <div className="mt-3 rounded-xl border border-slate-100">
           <button
             type="button"
             onClick={() => setShowExemptDetail((v) => !v)}
             className="flex w-full items-center justify-between px-4 py-3 text-sm font-semibold text-ink"
           >
-            <span>פירוט חישוב הפטור על הקצבה המזכה</span>
+            <span>חישוב מדויק של הפטור (כולל מדדים)</span>
             <span className="text-ink-soft">{showExemptDetail ? "−" : "+"}</span>
           </button>
           {showExemptDetail &&
@@ -800,29 +900,77 @@ export default function NetPensionCalculator() {
                 לא בוצע קיבוע זכויות — אין כלל פטור על הקצבה המזכה.
               </p>
             ) : (
-              <dl className="divide-y divide-slate-100 border-t border-slate-100 text-sm">
-                <Row
-                  label={`שיעור הפטור בפרישה (${result.retireYear})`}
-                  value={result.exemptRateAtRetire.toFixed(1) + "%"}
-                />
-                <Row
-                  label="הון פטור (תקרה × שיעור × 180)"
-                  value={ILS.format(result.exemptCapital)}
-                />
-                <Row
-                  label="קיזוז פיצויים פטורים (×1.35, ממודד)"
-                  value={ILSminus(result.offset)}
-                />
-                <Row
-                  label="יתרת הון פטור"
-                  value={ILS.format(result.remainingCapital)}
-                />
-                <Row
-                  label="פטור חודשי (יתרה ÷ 180)"
-                  value={ILS.format(result.monthlyExemption)}
-                  strong
-                />
-              </dl>
+              <div className="border-t border-slate-100">
+                <dl className="divide-y divide-slate-100 text-sm">
+                  <Row label="שנת זכאות" value={String(result.eligibilityYear)} />
+                  <Row
+                    label="תקרת קצבה מזכה"
+                    value={ILS.format(result.exemptCeiling)}
+                  />
+                  <Row label="שיעור הפטור" value={result.exemptRate + "%"} />
+                  <Row
+                    label="הון פטור (תקרה × שיעור × 180)"
+                    value={ILS.format(result.exemptCapital)}
+                  />
+                </dl>
+
+                {severanceWithdrawn && (
+                  <div className="border-t border-slate-100">
+                    <p className="bg-slate-50 px-4 py-2 text-xs font-bold text-ink">
+                      מידוד פיצויים פטורים (מדד אחרון: {result.idxToday.toFixed(2)}{" "}
+                      · {CPI_LATEST_KEY})
+                    </p>
+                    {result.severanceLines.map((l, i) => (
+                      <div
+                        key={l.id}
+                        className="px-4 py-2 text-xs text-ink-soft"
+                      >
+                        <span className="font-semibold text-ink">
+                          משיכה {i + 1}:
+                        </span>{" "}
+                        {l.monthKey} · מדד {l.idxAtWithdraw.toFixed(2)} → מקדם{" "}
+                        {l.indexFactor.toFixed(4)} · מוצמד{" "}
+                        {ILS.format(l.indexed)} · ×{SEVERANCE_FACTOR}
+                        {l.propFactor < 1
+                          ? ` · ${SEVERANCE_YEARS_CAP}/${l.yearsWorked} שנים (×${l.propFactor.toFixed(3)})`
+                          : ""}{" "}
+                        ={" "}
+                        <span className="font-bold text-ink">
+                          {l.exemptByTransition
+                            ? "פטור (הוראת מעבר)"
+                            : ILS.format(l.used)}
+                        </span>
+                      </div>
+                    ))}
+                    <dl className="divide-y divide-slate-100 text-sm">
+                      <Row
+                        label="סך פגיעה (לפני תקרה)"
+                        value={ILS.format(result.severanceUsedRaw)}
+                      />
+                      <Row
+                        label="תקרת קיזוז (35% × תקרה × 180)"
+                        value={ILS.format(result.offsetCap)}
+                      />
+                    </dl>
+                  </div>
+                )}
+
+                <dl className="divide-y divide-slate-100 border-t border-slate-100 text-sm">
+                  <Row
+                    label="קיזוז פיצויים פטורים"
+                    value={ILSminus(result.offset)}
+                  />
+                  <Row
+                    label="יתרת הון פטור"
+                    value={ILS.format(result.remainingCapital)}
+                  />
+                  <Row
+                    label="פטור חודשי (יתרה ÷ 180)"
+                    value={ILS.format(result.monthlyExemption)}
+                    strong
+                  />
+                </dl>
+              </div>
             ))}
         </div>
 
