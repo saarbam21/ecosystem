@@ -283,7 +283,7 @@ function NumField({ label, value, onChange, placeholder, suffix, thousands, asTe
 }
 
 // Hebrew month + year selects, stored as a "YYYY-MM" string.
-function MonthPicker({ value, onChange }) {
+function MonthPicker({ value, onChange, monthClass = "w-24" }) {
   const [yy, mm] = (value || CURRENT_MONTH_KEY).split("-");
   const cls =
     "rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm text-ink outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100";
@@ -292,7 +292,7 @@ function MonthPicker({ value, onChange }) {
       <select
         value={mm}
         onChange={(e) => onChange(`${yy}-${e.target.value}`)}
-        className={`${cls} w-24`}
+        className={`${cls} ${monthClass}`}
         aria-label="חודש"
       >
         {HEB_MONTHS.map((name, i) => (
@@ -617,18 +617,14 @@ export default function NetPensionCalculator() {
             <label className="mb-1 block font-medium text-ink">
               חודש ושנת לידה
             </label>
-            <MonthPicker value={birthDate} onChange={setBirthDate} />
+            <MonthPicker
+              value={birthDate}
+              onChange={setBirthDate}
+              monthClass="w-48"
+            />
             <p className="mt-1 text-xs text-ink-soft">
               גיל נוכחי: {formatAge(result.currentAge)} · גיל פרישה עפ״י חוק:{" "}
               {formatAge(result.legalAge)}.
-            </p>
-            <p className="mt-1 text-xs font-semibold text-brand-700">
-              חודש הזכאות: {result.eligMonthLabel}
-            </p>
-            <p className="mt-0.5 text-xs text-ink-soft">
-              המאוחר מבין חודש ההגעה לגיל הפרישה עפ״י חוק לבין חודש תחילת הקצבה.
-              {!result.ageEligible &&
-                " משיכה לפני גיל הפרישה — ללא פטור על הקצבה המזכה."}
             </p>
           </div>
           <div>
@@ -641,6 +637,17 @@ export default function NetPensionCalculator() {
               onChange={setRetireAge}
             />
           </div>
+        </div>
+
+        <div className="mt-8">
+          <p className="text-xs font-semibold text-brand-700">
+            חודש הזכאות: {result.eligMonthLabel}
+          </p>
+          <p className="mt-0.5 text-xs text-ink-soft">
+            המאוחר מבין חודש ההגעה לגיל הפרישה עפ״י חוק לבין חודש תחילת הקצבה.
+            {!result.ageEligible &&
+              " משיכה לפני גיל הפרישה — ללא פטור על הקצבה המזכה."}
+          </p>
         </div>
       </div>
 
