@@ -16,6 +16,13 @@ const NOW = new Date();
 const CURRENT_YEAR = NOW.getFullYear();
 const CURRENT_MONTH_KEY = `${CURRENT_YEAR}-${String(NOW.getMonth() + 1).padStart(2, "0")}`;
 
+const HEB_MONTHS = [
+  "ינואר", "פברואר", "מרץ", "אפריל", "מאי", "יוני",
+  "יולי", "אוגוסט", "ספטמבר", "אוקטובר", "נובמבר", "דצמבר",
+];
+const SEVERANCE_YEAR_OPTIONS = [];
+for (let y = CURRENT_YEAR; y >= 2012; y--) SEVERANCE_YEAR_OPTIONS.push(y);
+
 // Severance "use up" multiplier and the statutory divisor used in the
 // exempt-capital formula (תיקון 190 / קיבוע זכויות).
 const SEVERANCE_FACTOR = 1.35;
@@ -250,6 +257,41 @@ function NumField({ label, value, onChange, placeholder, suffix, thousands, asTe
         )}
       </div>
       {hint && <p className="mt-1 text-xs text-ink-soft">{hint}</p>}
+    </div>
+  );
+}
+
+// Hebrew month + year selects, stored as a "YYYY-MM" string.
+function MonthPicker({ value, onChange }) {
+  const [yy, mm] = (value || CURRENT_MONTH_KEY).split("-");
+  const cls =
+    "rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm text-ink outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100";
+  return (
+    <div className="flex gap-2">
+      <select
+        value={mm}
+        onChange={(e) => onChange(`${yy}-${e.target.value}`)}
+        className={`${cls} flex-1`}
+        aria-label="חודש"
+      >
+        {HEB_MONTHS.map((name, i) => (
+          <option key={i} value={String(i + 1).padStart(2, "0")}>
+            {name}
+          </option>
+        ))}
+      </select>
+      <select
+        value={yy}
+        onChange={(e) => onChange(`${e.target.value}-${mm}`)}
+        className={cls}
+        aria-label="שנה"
+      >
+        {SEVERANCE_YEAR_OPTIONS.map((y) => (
+          <option key={y} value={String(y)}>
+            {y}
+          </option>
+        ))}
+      </select>
     </div>
   );
 }
@@ -659,11 +701,7 @@ export default function NetPensionCalculator() {
             בוצע קיבוע זכויות
           </Check>
 
-          <Check
-            checked={severanceWithdrawn}
-            onChange={setSeveranceWithdrawn}
-            hint="פיצויים פטורים שנמשכו ב-32 שנות העבודה שקדמו לגיל הפרישה."
-          >
+          <Check checked={severanceWithdrawn} onChange={setSeveranceWithdrawn}>
             נמשכו פיצויים פטורים
           </Check>
 
@@ -679,83 +717,98 @@ export default function NetPensionCalculator() {
                   + הוספת משיכה
                 </button>
               </div>
-              <div className="space-y-3">
+              <div className="space-y-4">
                 {severances.map((s, idx) => {
                   const sl = result.severanceLines.find((l) => l.id === s.id);
                   return (
-                    <div
-                      key={s.id}
-                      className="grid items-end gap-3 sm:grid-cols-[1fr,9rem,6rem,1fr,auto]"
-                    >
-                      <NumField
-                        label={idx === 0 ? "סכום שנמשך" : undefined}
-                        value={s.amount}
-                        placeholder="0"
-                        suffix="₪"
-                        thousands
-                        onChange={(v) => setSeverance(s.id, { amount: v })}
-                      />
-                      <div>
-                        {idx === 0 && (
-                          <label className="mb-1 block text-sm font-medium text-ink">
-                            חודש משיכה
-                          </label>
-                        )}
-                        <input
-                          type="month"
-                          dir="ltr"
-                          value={s.month}
-                          min={CPI_FIRST_MONTH}
-                          max={CURRENT_MONTH_KEY}
-                          onChange={(e) =>
-                            setSeverance(s.id, { month: e.target.value })
-                          }
-                          className="w-full rounded-lg border border-slate-200 px-3 py-2 text-ink outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
+                    <div key={s.id}>
+                      <div className="grid items-end gap-3 sm:grid-cols-[1fr,12rem,6rem,1fr,auto]">
+                        <NumField
+                          label={idx === 0 ? "סכום שנמשך" : undefined}
+                          value={s.amount}
+                          placeholder="0"
+                          suffix="₪"
+                          thousands
+                          onChange={(v) => setSeverance(s.id, { amount: v })}
                         />
-                      </div>
-                      <NumField
-                        label={idx === 0 ? "שנות עבודה" : undefined}
-                        value={s.yearsWorked}
-                        placeholder="—"
-                        asText
-                        onChange={(v) => setSeverance(s.id, { yearsWorked: v })}
-                      />
-                      <div>
-                        {idx === 0 && (
-                          <label className="mb-1 block text-sm font-medium text-ink">
-                            סכום הפגיעה בפטור
-                          </label>
-                        )}
-                        <div
-                          dir="rtl"
-                          className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-right text-ink"
-                        >
-                          {sl && sl.exemptByTransition ? (
-                            <span className="text-xs font-medium text-emerald-700">
-                              פטור (הוראת מעבר)
-                            </span>
-                          ) : (
-                            ILS.format(sl ? sl.used : 0)
+                        <div>
+                          {idx === 0 && (
+                            <label className="mb-1 block text-sm font-medium text-ink">
+                              חודש משיכה
+                            </label>
                           )}
+                          <MonthPicker
+                            value={s.month}
+                            onChange={(v) => setSeverance(s.id, { month: v })}
+                          />
                         </div>
+                        <NumField
+                          label={idx === 0 ? "שנות עבודה" : undefined}
+                          value={s.yearsWorked}
+                          placeholder="—"
+                          asText
+                          onChange={(v) => setSeverance(s.id, { yearsWorked: v })}
+                        />
+                        <div>
+                          {idx === 0 && (
+                            <label className="mb-1 block text-sm font-medium text-ink">
+                              סכום הפגיעה בפטור
+                            </label>
+                          )}
+                          <div
+                            dir="rtl"
+                            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-right text-ink"
+                          >
+                            {sl && sl.exemptByTransition ? (
+                              <span className="text-xs font-medium text-emerald-700">
+                                פטור (הוראת מעבר)
+                              </span>
+                            ) : (
+                              ILS.format(sl ? sl.used : 0)
+                            )}
+                          </div>
+                        </div>
+                        {severances.length > 1 ? (
+                          <button
+                            type="button"
+                            onClick={() => removeSeverance(s.id)}
+                            className="px-2 py-2 text-sm font-medium text-red-600 hover:underline"
+                          >
+                            הסרה
+                          </button>
+                        ) : (
+                          <span />
+                        )}
                       </div>
-                      {severances.length > 1 ? (
-                        <button
-                          type="button"
-                          onClick={() => removeSeverance(s.id)}
-                          className="px-2 py-2 text-sm font-medium text-red-600 hover:underline"
-                        >
-                          הסרה
-                        </button>
-                      ) : (
-                        <span />
+
+                      {/* How this withdrawal's impact was derived */}
+                      {sl && sl.amount > 0 && !sl.exemptByTransition && (
+                        <p dir="rtl" className="mt-1.5 text-xs text-ink-soft">
+                          מדד במשיכה {sl.idxAtWithdraw.toFixed(2)} → מדד היום{" "}
+                          {result.idxToday.toFixed(2)} (מקדם{" "}
+                          {sl.indexFactor.toFixed(4)}) · מוצמד{" "}
+                          {ILS.format(sl.indexed)} · ×{SEVERANCE_FACTOR}
+                          {sl.propFactor < 1
+                            ? ` · ${SEVERANCE_YEARS_CAP}/${sl.yearsWorked} שנים (×${sl.propFactor.toFixed(3)})`
+                            : ""}{" "}
+                          ={" "}
+                          <span className="font-bold text-ink">
+                            {ILS.format(sl.used)}
+                          </span>
+                        </p>
+                      )}
+                      {sl && sl.exemptByTransition && (
+                        <p dir="rtl" className="mt-1.5 text-xs text-emerald-700">
+                          פטור מלא — הוראת מעבר (משיכה לפני 2012, חלפו מעל 15 שנה
+                          עד הזכאות).
+                        </p>
                       )}
                     </div>
                   );
                 })}
               </div>
               {severances.length > 1 && (
-                <div className="mt-3 grid items-center gap-3 border-t border-slate-200 pt-3 sm:grid-cols-[1fr,9rem,6rem,1fr,auto]">
+                <div className="mt-3 grid items-center gap-3 border-t border-slate-200 pt-3 sm:grid-cols-[1fr,12rem,6rem,1fr,auto]">
                   <span className="text-sm font-semibold text-ink sm:col-span-3">
                     סה״כ הפגיעה בפטור
                   </span>
@@ -773,12 +826,6 @@ export default function NetPensionCalculator() {
                   </span>
                 </div>
               )}
-              <p className="mt-3 text-xs text-ink-soft">
-                סכום הפגיעה = הסכום שנמשך × {SEVERANCE_FACTOR}, ממודד לפי מדד
-                המחירים לצרכן מחודש המשיכה ועד היום. אם שנות העבודה עולות על{" "}
-                {SEVERANCE_YEARS_CAP} — נלקח החלק היחסי בלבד. סך הקיזוז מוגבל ל-35%
-                מתקרת הפטור × 180.
-              </p>
               {result.offsetIsCapped && (
                 <p className="mt-2 text-xs font-medium text-amber-700">
                   הקיזוז הוגבל לתקרה (35% × תקרת פטור × 180 ={" "}
@@ -891,7 +938,7 @@ export default function NetPensionCalculator() {
             onClick={() => setShowExemptDetail((v) => !v)}
             className="flex w-full items-center justify-between px-4 py-3 text-sm font-semibold text-ink"
           >
-            <span>חישוב מדויק של הפטור (כולל מדדים)</span>
+            <span>פירוט חישוב הפטור על הקצבה המזכה</span>
             <span className="text-ink-soft">{showExemptDetail ? "−" : "+"}</span>
           </button>
           {showExemptDetail &&
@@ -900,77 +947,39 @@ export default function NetPensionCalculator() {
                 לא בוצע קיבוע זכויות — אין כלל פטור על הקצבה המזכה.
               </p>
             ) : (
-              <div className="border-t border-slate-100">
-                <dl className="divide-y divide-slate-100 text-sm">
-                  <Row label="שנת זכאות" value={String(result.eligibilityYear)} />
-                  <Row
-                    label="תקרת קצבה מזכה"
-                    value={ILS.format(result.exemptCeiling)}
-                  />
-                  <Row label="שיעור הפטור" value={result.exemptRate + "%"} />
-                  <Row
-                    label="הון פטור (תקרה × שיעור × 180)"
-                    value={ILS.format(result.exemptCapital)}
-                  />
-                </dl>
-
+              <dl className="divide-y divide-slate-100 border-t border-slate-100 text-sm">
+                <Row
+                  label={`תקרת קצבה מזכה (שנת זכאות ${result.eligibilityYear})`}
+                  value={ILS.format(result.exemptCeiling)}
+                />
+                <Row label="שיעור הפטור" value={result.exemptRate + "%"} />
+                <Row
+                  label={`הון פטור (${result.exemptCeiling.toLocaleString("he-IL")} × ${result.exemptRate}% × 180)`}
+                  value={ILS.format(result.exemptCapital)}
+                />
                 {severanceWithdrawn && (
-                  <div className="border-t border-slate-100">
-                    <p className="bg-slate-50 px-4 py-2 text-xs font-bold text-ink">
-                      מידוד פיצויים פטורים (מדד אחרון: {result.idxToday.toFixed(2)}{" "}
-                      · {CPI_LATEST_KEY})
-                    </p>
-                    {result.severanceLines.map((l, i) => (
-                      <div
-                        key={l.id}
-                        className="px-4 py-2 text-xs text-ink-soft"
-                      >
-                        <span className="font-semibold text-ink">
-                          משיכה {i + 1}:
-                        </span>{" "}
-                        {l.monthKey} · מדד {l.idxAtWithdraw.toFixed(2)} → מקדם{" "}
-                        {l.indexFactor.toFixed(4)} · מוצמד{" "}
-                        {ILS.format(l.indexed)} · ×{SEVERANCE_FACTOR}
-                        {l.propFactor < 1
-                          ? ` · ${SEVERANCE_YEARS_CAP}/${l.yearsWorked} שנים (×${l.propFactor.toFixed(3)})`
-                          : ""}{" "}
-                        ={" "}
-                        <span className="font-bold text-ink">
-                          {l.exemptByTransition
-                            ? "פטור (הוראת מעבר)"
-                            : ILS.format(l.used)}
-                        </span>
-                      </div>
-                    ))}
-                    <dl className="divide-y divide-slate-100 text-sm">
-                      <Row
-                        label="סך פגיעה (לפני תקרה)"
-                        value={ILS.format(result.severanceUsedRaw)}
-                      />
-                      <Row
-                        label="תקרת קיזוז (35% × תקרה × 180)"
-                        value={ILS.format(result.offsetCap)}
-                      />
-                    </dl>
-                  </div>
+                  <>
+                    <Row
+                      label="סך הפגיעה בפטור (לפני תקרה)"
+                      value={ILSminus(result.severanceUsedRaw)}
+                    />
+                    <Row
+                      label={`תקרת קיזוז (35% × ${result.exemptCeiling.toLocaleString("he-IL")} × 180)`}
+                      value={ILS.format(result.offsetCap)}
+                    />
+                    <Row label="קיזוז בפועל" value={ILSminus(result.offset)} />
+                  </>
                 )}
-
-                <dl className="divide-y divide-slate-100 border-t border-slate-100 text-sm">
-                  <Row
-                    label="קיזוז פיצויים פטורים"
-                    value={ILSminus(result.offset)}
-                  />
-                  <Row
-                    label="יתרת הון פטור"
-                    value={ILS.format(result.remainingCapital)}
-                  />
-                  <Row
-                    label="פטור חודשי (יתרה ÷ 180)"
-                    value={ILS.format(result.monthlyExemption)}
-                    strong
-                  />
-                </dl>
-              </div>
+                <Row
+                  label="יתרת הון פטור"
+                  value={ILS.format(result.remainingCapital)}
+                />
+                <Row
+                  label="פטור חודשי (יתרה ÷ 180)"
+                  value={ILS.format(result.monthlyExemption)}
+                  strong
+                />
+              </dl>
             ))}
         </div>
 
