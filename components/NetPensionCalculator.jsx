@@ -23,6 +23,21 @@ const HEB_MONTHS = [
   "ינואר", "פברואר", "מרץ", "אפריל", "מאי", "יוני",
   "יולי", "אוגוסט", "ספטמבר", "אוקטובר", "נובמבר", "דצמבר",
 ];
+// Default birth = 50 years before the current month.
+const DEFAULT_BIRTH = `${CURRENT_YEAR - 50}-${String(NOW.getMonth() + 1).padStart(2, "0")}`;
+
+// "YYYY-MM" month-key helpers.
+const monthIndex = (key) => {
+  const [y, m] = String(key).split("-").map(Number);
+  return y * 12 + (m - 1);
+};
+const keyFromIndex = (idx) =>
+  `${Math.floor(idx / 12)}-${String((idx % 12) + 1).padStart(2, "0")}`;
+const addMonthsKey = (key, n) => keyFromIndex(monthIndex(key) + n);
+const hebMonthLabel = (key) => {
+  const [y, m] = String(key).split("-").map(Number);
+  return `${HEB_MONTHS[m - 1]} ${y}`;
+};
 
 // Severance "use up" multiplier and the statutory divisor used in the
 // exempt-capital formula (תיקון 190 / קיבוע זכויות).
@@ -53,18 +68,16 @@ const EXEMPT_BY_YEAR = {
 const EXEMPT_YEAR_MIN = 2012;
 const EXEMPT_YEAR_MAX = 2026;
 
-const CURRENT_CEILING = 9430; // תקרת קצבה מזכה הנוכחית
+const CURRENT_CEILING = 9430; // תקרת קצבה מזכה (נכון לשנת 2026) — אינה צמודת מדד.
 
-// שיעור/תקרה לפי שנת הזכאות. לפני 2012 — 35%. 2027 — 62.5%, 2028 ואילך — 67%.
-// לשנת זכאות עתידית התקרה מוערכת לפי הנחת מדד עתידי (estimate=true).
-function exemptForYear(year, futureRate) {
+// שיעור/תקרה לפי שנת הזכאות. התקרה אינה מוצמדת — נשארת התקרה הנוכחית.
+// השיעור: לפני 2012 — 35%; 2027 — 62.5%; 2028 ואילך — 67% (צפוי).
+function exemptForYear(year) {
   const y = Math.round(year);
-  if (y < EXEMPT_YEAR_MIN) return { ceiling: 8190, rate: 35, estimate: false };
-  if (y <= EXEMPT_YEAR_MAX) return { ...EXEMPT_BY_YEAR[y], estimate: false };
+  if (y < EXEMPT_YEAR_MIN) return { ceiling: 8190, rate: 35, rateEstimate: false };
+  if (y <= EXEMPT_YEAR_MAX) return { ...EXEMPT_BY_YEAR[y], rateEstimate: false };
   const rate = y === 2027 ? 62.5 : 67;
-  const ceiling =
-    CURRENT_CEILING * Math.pow(1 + (futureRate || 0) / 100, y - EXEMPT_YEAR_MAX);
-  return { ceiling, rate, estimate: true };
+  return { ceiling: CURRENT_CEILING, rate, rateEstimate: true };
 }
 
 // ניצול הפיצויים הפטורים מוגבל ל-35% × תקרת הפטור × 180.
@@ -371,7 +384,7 @@ function SectionTitle({ children, action }) {
 
 export default function NetPensionCalculator() {
   const [gender, setGender] = useState("male");
-  const [currentAge, setCurrentAge] = useState(50);
+  const [birthDate, setBirthDate] = useState(DEFAULT_BIRTH); // YYYY-MM
   const [retireAge, setRetireAge] = useState(67);
   const [portfolios, setPortfolios] = useState([newPortfolio()]);
 
@@ -414,29 +427,33 @@ export default function NetPensionCalculator() {
 
   // ----- calculation -----
   const result = useMemo(() => {
-    const birthYear = CURRENT_YEAR - Math.round(num(currentAge));
+    const birthYear = parseInt(String(birthDate).slice(0, 4), 10) || CURRENT_YEAR - 50;
+    const currentAge = Math.max(0, (monthIndex(CURRENT_MONTH_KEY) - monthIndex(birthDate)) / 12);
     const legalAge = legalRetirementAge(gender, birthYear);
-    const legalRetireYear = Math.round(birthYear + legalAge);
-    const pensionStartYear = birthYear + Math.round(num(retireAge));
-    // מועד הזכאות (לקיבוע זכויות) = ינואר של השנה המאוחרת מבין גיל פרישה חוקי
-    // לבין תחילת קבלת הקצבה. הפגיעה והתקרה מתייחסות למועד זה.
-    const eligibilityYear = Math.max(legalRetireYear, pensionStartYear);
-    const eligMonthLabel = `ינואר ${eligibilityYear}`;
+
+    // Precise months of reaching legal age and of starting the pension.
+    const legalRetMonthKey = addMonthsKey(birthDate, Math.round(legalAge * 12));
+    const pensionStartMonthKey = addMonthsKey(birthDate, Math.round(num(retireAge) * 12));
+    // מועד הזכאות = המאוחר מבין חודש גיל הפרישה החוקי לבין חודש תחילת הקצבה.
+    const eligMonthKey =
+      monthIndex(legalRetMonthKey) >= monthIndex(pensionStartMonthKey)
+        ? legalRetMonthKey
+        : pensionStartMonthKey;
+    const eligibilityYear = parseInt(eligMonthKey.slice(0, 4), 10);
+    const eligMonthLabel = hebMonthLabel(eligMonthKey);
     const futureRate = num(tax.indexFuture);
 
-    // Ceiling + exempt rate at the eligibility year (ceiling projected forward
-    // by the future-index assumption when the year is in the future).
+    // Ceiling (current, not indexed) + exempt rate by the eligibility year.
     const {
       ceiling: exemptCeiling,
       rate: exemptRate,
-      estimate: ceilingEstimate,
-    } = exemptForYear(eligibilityYear, futureRate);
+      rateEstimate,
+    } = exemptForYear(eligibilityYear);
 
     // Forward-index factor: from the latest known CPI month to the eligibility
-    // month (January of the eligibility year), using the future-index rate.
+    // month, using the future-index assumption.
     const idxToday = CPI_LATEST;
-    const [latestY, latestM] = CPI_LATEST_KEY.split("-").map(Number);
-    const monthsAhead = (eligibilityYear - latestY) * 12 + (1 - latestM);
+    const monthsAhead = monthIndex(eligMonthKey) - monthIndex(CPI_LATEST_KEY);
     const yearsAhead = Math.max(0, monthsAhead / 12);
     const forwardFactor = Math.pow(1 + futureRate / 100, yearsAhead);
 
@@ -529,7 +546,7 @@ export default function NetPensionCalculator() {
       offsetCap,
       offsetIsCapped,
       birthYear,
-      legalRetireYear,
+      currentAge,
       eligibilityYear,
       eligMonthLabel,
       legalAge,
@@ -538,7 +555,7 @@ export default function NetPensionCalculator() {
       forwardFactor,
       yearsAhead,
       exemptCeiling,
-      ceilingEstimate,
+      rateEstimate,
       exemptRate,
       exemptCapital,
       offset,
@@ -562,7 +579,7 @@ export default function NetPensionCalculator() {
     kibuaDone,
     severanceWithdrawn,
     gender,
-    currentAge,
+    birthDate,
     retireAge,
   ]);
 
@@ -597,38 +614,29 @@ export default function NetPensionCalculator() {
 
         <div className="grid gap-6 sm:grid-cols-2">
           <div>
-            <Slider
-              label="גיל נוכחי"
-              value={currentAge}
-              min={18}
-              max={100}
-              onChange={(v) => {
-                setCurrentAge(v);
-                if (v > retireAge) setRetireAge(v);
-              }}
-            />
+            <label className="mb-1 block font-medium text-ink">
+              חודש ושנת לידה
+            </label>
+            <MonthPicker value={birthDate} onChange={setBirthDate} />
             <p className="mt-1 text-xs text-ink-soft">
-              שנת לידה: {result.birthYear} · גיל פרישה עפ״י חוק:{" "}
-              {formatAge(result.legalAge)} (שנת {result.legalRetireYear}).
-            </p>
-            <p className="mt-0.5 text-xs text-ink-soft">
-              חודש הזכאות: {result.eligMonthLabel} (המאוחר מבין גיל פרישה עפ״י חוק
-              לבין תחילת הקצבה) — הפגיעה מתייחסת למועד זה.
+              גיל נוכחי: {formatAge(result.currentAge)} · גיל פרישה עפ״י חוק:{" "}
+              {formatAge(result.legalAge)}.
             </p>
           </div>
           <div>
             <Slider
               label="גיל תחילת משיכת קצבה"
               value={retireAge}
-              min={Math.max(60, currentAge)}
+              min={60}
               max={100}
               display={formatAge(retireAge)}
               onChange={setRetireAge}
             />
             <p className="mt-1 text-xs text-ink-soft">
-              גיל פרישה עפ״י חוק: {formatAge(result.legalAge)}.
+              חודש הזכאות: {result.eligMonthLabel} (המאוחר מבין חודש ההגעה לגיל
+              הפרישה עפ״י חוק לבין חודש תחילת הקצבה).
               {!result.ageEligible &&
-                " משיכה לפני גיל זה — ללא פטור על הקצבה המזכה."}
+                " משיכה לפני גיל הפרישה — ללא פטור על הקצבה המזכה."}
             </p>
           </div>
         </div>
@@ -1021,17 +1029,17 @@ export default function NetPensionCalculator() {
             ) : (
               <dl className="divide-y divide-slate-100 border-t border-slate-100 text-sm">
                 <Row
-                  label={`תקרת קצבה מזכה ${result.eligMonthLabel}${result.ceilingEstimate ? " (הערכה)" : ""}`}
+                  label="תקרת קצבה מזכה (נכון לשנת 2026)"
                   value={ILS.format(result.exemptCeiling)}
                 />
-                {result.ceilingEstimate && (
-                  <p className="px-4 py-2 text-xs text-amber-700">
-                    תקרת הקצבה המזכה במועד הזכאות היא הערכה לפי הנחת מדד עתידי (
-                    {result.futureRate}%). התקרה הנוכחית היא{" "}
-                    {ILS.format(CURRENT_CEILING)}.
-                  </p>
-                )}
-                <Row label="שיעור הפטור" value={result.exemptRate + "%"} />
+                <Row
+                  label={
+                    result.rateEstimate
+                      ? `שיעור הפטור (צפוי בשנת ${result.eligibilityYear})`
+                      : `שיעור הפטור (שנת ${result.eligibilityYear})`
+                  }
+                  value={result.exemptRate + "%"}
+                />
                 <Row
                   label={`הון פטור (${Math.round(result.exemptCeiling).toLocaleString("he-IL")} × ${result.exemptRate}% × 180)`}
                   value={ILS.format(result.exemptCapital)}
