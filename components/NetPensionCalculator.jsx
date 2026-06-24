@@ -292,7 +292,7 @@ function MonthPicker({ value, onChange }) {
       <select
         value={mm}
         onChange={(e) => onChange(`${yy}-${e.target.value}`)}
-        className={`${cls} flex-1`}
+        className={`${cls} w-24`}
         aria-label="חודש"
       >
         {HEB_MONTHS.map((name, i) => (
@@ -310,7 +310,7 @@ function MonthPicker({ value, onChange }) {
         onChange={(e) =>
           onChange(`${e.target.value.replace(/[^\d]/g, "")}-${mm}`)
         }
-        className={`${cls} w-20 text-center`}
+        className={`${cls} w-16 text-center`}
         aria-label="שנה"
       />
     </div>
@@ -622,6 +622,14 @@ export default function NetPensionCalculator() {
               גיל נוכחי: {formatAge(result.currentAge)} · גיל פרישה עפ״י חוק:{" "}
               {formatAge(result.legalAge)}.
             </p>
+            <p className="mt-1 text-xs font-semibold text-brand-700">
+              חודש הזכאות: {result.eligMonthLabel}
+            </p>
+            <p className="mt-0.5 text-xs text-ink-soft">
+              המאוחר מבין חודש ההגעה לגיל הפרישה עפ״י חוק לבין חודש תחילת הקצבה.
+              {!result.ageEligible &&
+                " משיכה לפני גיל הפרישה — ללא פטור על הקצבה המזכה."}
+            </p>
           </div>
           <div>
             <Slider
@@ -632,14 +640,6 @@ export default function NetPensionCalculator() {
               display={formatAge(retireAge)}
               onChange={setRetireAge}
             />
-            <p className="mt-1 text-base font-bold text-brand-700">
-              חודש הזכאות: {result.eligMonthLabel}
-            </p>
-            <p className="mt-0.5 text-xs text-ink-soft">
-              המאוחר מבין חודש ההגעה לגיל הפרישה עפ״י חוק לבין חודש תחילת הקצבה.
-              {!result.ageEligible &&
-                " משיכה לפני גיל הפרישה — ללא פטור על הקצבה המזכה."}
-            </p>
           </div>
         </div>
       </div>
