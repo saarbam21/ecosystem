@@ -601,7 +601,7 @@ export default function NetPensionCalculator() {
               label="גיל נוכחי"
               value={currentAge}
               min={18}
-              max={80}
+              max={100}
               onChange={(v) => {
                 setCurrentAge(v);
                 if (v > retireAge) setRetireAge(v);
@@ -621,7 +621,7 @@ export default function NetPensionCalculator() {
               label="גיל תחילת משיכת קצבה"
               value={retireAge}
               min={Math.max(60, currentAge)}
-              max={80}
+              max={100}
               display={formatAge(retireAge)}
               onChange={setRetireAge}
             />
