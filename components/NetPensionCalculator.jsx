@@ -52,12 +52,14 @@ const EXEMPT_BY_YEAR = {
 const EXEMPT_YEAR_MIN = 2012;
 const EXEMPT_YEAR_MAX = 2026;
 
-// שיעור/תקרה לפי שנת הזכאות. לפני 2012 — 35%. אחרי הטבלה — לפי השנה האחרונה הידועה.
+// שיעור/תקרה לפי שנת הזכאות. לפני 2012 — 35%. 2027 — 62.5%, 2028 ואילך — 67%
+// (לפי לוח הזמנים שנקבע; התקרה נשארת כפי שהיא בשנה האחרונה הידועה).
 function exemptForYear(year) {
   const y = Math.round(year);
   if (y < EXEMPT_YEAR_MIN) return { ceiling: 8190, rate: 35 };
-  if (y > EXEMPT_YEAR_MAX) return EXEMPT_BY_YEAR[EXEMPT_YEAR_MAX];
-  return EXEMPT_BY_YEAR[y];
+  if (y <= EXEMPT_YEAR_MAX) return EXEMPT_BY_YEAR[y];
+  if (y === 2027) return { ceiling: 9430, rate: 62.5 };
+  return { ceiling: 9430, rate: 67 }; // 2028 ואילך
 }
 
 // ניצול הפיצויים הפטורים מוגבל ל-35% × תקרת הפטור × 180.
@@ -380,6 +382,7 @@ export default function NetPensionCalculator() {
   const [showAssumptions, setShowAssumptions] = useState(false);
   const [showExemptDetail, setShowExemptDetail] = useState(false);
   const [showNetDetail, setShowNetDetail] = useState(false);
+  const [showSeveranceCalc, setShowSeveranceCalc] = useState(false);
 
   const setGender2 = (g) => {
     setGender(g);
@@ -439,24 +442,23 @@ export default function NetPensionCalculator() {
       const wy = parseInt(monthKey.slice(0, 4), 10) || CURRENT_YEAR;
       const idxAtWithdraw = cpiAtMonth(monthKey);
       const indexFactor = idxAtWithdraw > 0 ? idxToday / idxAtWithdraw : 1;
-      const indexed = amount * indexFactor;
-      const grossUsed = indexed * SEVERANCE_FACTOR;
       const yearsWorked = num(s.yearsWorked);
       const propFactor =
         yearsWorked > SEVERANCE_YEARS_CAP ? SEVERANCE_YEARS_CAP / yearsWorked : 1;
+      // Display order: gross × 1.35 × years-factor, then indexation.
+      const preIndex = amount * SEVERANCE_FACTOR * propFactor;
       const exemptByTransition =
         wy < TRANSITION_BEFORE_YEAR && eligibilityYear - wy >= TRANSITION_YEARS;
-      const used = exemptByTransition ? 0 : grossUsed * propFactor;
+      const used = exemptByTransition ? 0 : preIndex * indexFactor;
       return {
         id: s.id,
         amount,
         monthKey,
         idxAtWithdraw,
         indexFactor,
-        indexed,
         yearsWorked,
         propFactor,
-        grossUsed,
+        preIndex,
         used,
         exemptByTransition,
       };
@@ -781,23 +783,29 @@ export default function NetPensionCalculator() {
                         )}
                       </div>
 
-                      {/* How this withdrawal's impact was derived */}
-                      {sl && sl.amount > 0 && !sl.exemptByTransition && (
-                        <p dir="rtl" className="mt-1.5 text-xs text-ink-soft">
-                          מדד במשיכה {sl.idxAtWithdraw.toFixed(2)} → מדד היום{" "}
-                          {result.idxToday.toFixed(2)} (מקדם{" "}
-                          {sl.indexFactor.toFixed(4)}) · מוצמד{" "}
-                          {ILS.format(sl.indexed)} · ×{SEVERANCE_FACTOR}
-                          {sl.propFactor < 1
-                            ? ` · ${SEVERANCE_YEARS_CAP}/${sl.yearsWorked} שנים (×${sl.propFactor.toFixed(3)})`
-                            : ""}{" "}
-                          ={" "}
-                          <span className="font-bold text-ink">
-                            {ILS.format(sl.used)}
-                          </span>
-                        </p>
-                      )}
-                      {sl && sl.exemptByTransition && (
+                      {/* How this withdrawal's impact was derived (toggle) */}
+                      {showSeveranceCalc &&
+                        sl &&
+                        sl.amount > 0 &&
+                        !sl.exemptByTransition && (
+                          <p
+                            dir="ltr"
+                            className="mt-1.5 text-left text-xs text-ink-soft"
+                          >
+                            {ILS.format(sl.amount)} × {SEVERANCE_FACTOR}
+                            {sl.propFactor < 1
+                              ? ` × ${sl.propFactor.toFixed(3)} (32/${sl.yearsWorked})`
+                              : ""}{" "}
+                            = {ILS.format(sl.preIndex)} → מדד{" "}
+                            {sl.idxAtWithdraw.toFixed(2)} →{" "}
+                            {result.idxToday.toFixed(2)} (×
+                            {sl.indexFactor.toFixed(4)}) ={" "}
+                            <span className="font-bold text-ink">
+                              {ILS.format(sl.used)}
+                            </span>
+                          </p>
+                        )}
+                      {showSeveranceCalc && sl && sl.exemptByTransition && (
                         <p dir="rtl" className="mt-1.5 text-xs text-emerald-700">
                           פטור מלא — הוראת מעבר (משיכה לפני 2012, חלפו מעל 15 שנה
                           עד הזכאות).
@@ -807,6 +815,14 @@ export default function NetPensionCalculator() {
                   );
                 })}
               </div>
+
+              <button
+                type="button"
+                onClick={() => setShowSeveranceCalc((v) => !v)}
+                className="mt-2 text-xs font-medium text-brand-700 hover:underline"
+              >
+                {showSeveranceCalc ? "הסתר את חישוב הפגיעה" : "הצג את חישוב הפגיעה"}
+              </button>
               {severances.length > 1 && (
                 <div className="mt-3 grid items-center gap-3 border-t border-slate-200 pt-3 sm:grid-cols-[1fr,12rem,6rem,1fr,auto]">
                   <span className="text-sm font-semibold text-ink sm:col-span-3">
@@ -958,17 +974,10 @@ export default function NetPensionCalculator() {
                   value={ILS.format(result.exemptCapital)}
                 />
                 {severanceWithdrawn && (
-                  <>
-                    <Row
-                      label="סך הפגיעה בפטור (לפני תקרה)"
-                      value={ILSminus(result.severanceUsedRaw)}
-                    />
-                    <Row
-                      label={`תקרת קיזוז (35% × ${result.exemptCeiling.toLocaleString("he-IL")} × 180)`}
-                      value={ILS.format(result.offsetCap)}
-                    />
-                    <Row label="קיזוז בפועל" value={ILSminus(result.offset)} />
-                  </>
+                  <Row
+                    label="קיזוז פיצויים פטורים"
+                    value={ILSminus(result.offset)}
+                  />
                 )}
                 <Row
                   label="יתרת הון פטור"
