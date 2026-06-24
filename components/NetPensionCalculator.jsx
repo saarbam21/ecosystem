@@ -12,6 +12,9 @@ const ILS = new Intl.NumberFormat("he-IL", {
 // the ₪ sign stays to the left (matching the headline net figure).
 const ILSminus = (x) => (Math.abs(x) < 0.5 ? ILS.format(0) : ILS.format(-Math.abs(x)));
 
+// Plain LTR number with a trailing ₪ (no RLM marks) for inline formulas.
+const fmtNum = (x) => Math.round(x).toLocaleString("en-US") + " ₪";
+
 const NOW = new Date();
 const CURRENT_YEAR = NOW.getFullYear();
 const CURRENT_MONTH_KEY = `${CURRENT_YEAR}-${String(NOW.getMonth() + 1).padStart(2, "0")}`;
@@ -788,25 +791,41 @@ export default function NetPensionCalculator() {
                         sl &&
                         sl.amount > 0 &&
                         !sl.exemptByTransition && (
-                          <p
-                            dir="ltr"
-                            className="mt-1.5 text-left text-xs text-ink-soft"
+                          <div
+                            dir="rtl"
+                            className="mt-2 space-y-1 rounded-lg bg-white px-3 py-2 text-right text-xs text-ink-soft"
                           >
-                            {ILS.format(sl.amount)} × {SEVERANCE_FACTOR}
-                            {sl.propFactor < 1
-                              ? ` × ${sl.propFactor.toFixed(3)} (32/${sl.yearsWorked})`
-                              : ""}{" "}
-                            = {ILS.format(sl.preIndex)} → מדד{" "}
-                            {sl.idxAtWithdraw.toFixed(2)} →{" "}
-                            {result.idxToday.toFixed(2)} (×
-                            {sl.indexFactor.toFixed(4)}) ={" "}
-                            <span className="font-bold text-ink">
-                              {ILS.format(sl.used)}
-                            </span>
-                          </p>
+                            <div>
+                              סכום מוצמד:{" "}
+                              <bdi dir="ltr" className="font-medium text-ink">
+                                {fmtNum(sl.amount)} × {SEVERANCE_FACTOR}
+                                {sl.propFactor < 1
+                                  ? ` × ${sl.propFactor.toFixed(3)}`
+                                  : ""}{" "}
+                                = {fmtNum(sl.preIndex)}
+                              </bdi>
+                              {sl.propFactor < 1
+                                ? ` (32/${sl.yearsWorked} שנות עבודה)`
+                                : ""}
+                            </div>
+                            <div>
+                              הצמדה: מדד בסיס (חודש המשיכה){" "}
+                              <bdi dir="ltr">{sl.idxAtWithdraw.toFixed(2)}</bdi> →
+                              מדד נוכחי{" "}
+                              <bdi dir="ltr">{result.idxToday.toFixed(2)}</bdi> ·
+                              מקדם הצמדה{" "}
+                              <bdi dir="ltr">{sl.indexFactor.toFixed(4)}</bdi>
+                            </div>
+                            <div>
+                              פגיעה בפטור:{" "}
+                              <bdi dir="ltr" className="font-bold text-brand-700">
+                                {fmtNum(sl.used)}
+                              </bdi>
+                            </div>
+                          </div>
                         )}
                       {showSeveranceCalc && sl && sl.exemptByTransition && (
-                        <p dir="rtl" className="mt-1.5 text-xs text-emerald-700">
+                        <p dir="rtl" className="mt-1.5 text-right text-xs text-emerald-700">
                           פטור מלא — הוראת מעבר (משיכה לפני 2012, חלפו מעל 15 שנה
                           עד הזכאות).
                         </p>
