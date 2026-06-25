@@ -850,7 +850,7 @@ export default function NetPensionCalculator() {
                             className="mt-2 space-y-1 rounded-lg bg-white px-3 py-2 text-right text-xs text-ink-soft"
                           >
                             <div>
-                              סכום מוצמד:{" "}
+                              סכום לפני הצמדה:{" "}
                               <bdi dir="ltr" className="font-medium text-ink">
                                 {fmtNum(sl.amount)} × {SEVERANCE_FACTOR}
                                 {sl.propFactor < 1
