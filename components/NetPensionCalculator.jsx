@@ -636,6 +636,11 @@ export default function NetPensionCalculator() {
               display={formatAge(retireAge)}
               onChange={setRetireAge}
             />
+            {!result.ageEligible && (
+              <p className="mt-1 text-xs text-ink-soft">
+                משיכה לפני גיל הפרישה — ללא פטור על הקצבה המזכה.
+              </p>
+            )}
           </div>
         </div>
 
@@ -645,8 +650,6 @@ export default function NetPensionCalculator() {
           </p>
           <p className="mt-0.5 text-xs text-ink-soft">
             המאוחר מבין חודש ההגעה לגיל הפרישה עפ״י חוק לבין חודש תחילת הקצבה.
-            {!result.ageEligible &&
-              " משיכה לפני גיל הפרישה — ללא פטור על הקצבה המזכה."}
           </p>
         </div>
       </div>
