@@ -640,7 +640,7 @@ export default function NetPensionCalculator() {
         </div>
 
         <div className="mt-8">
-          <p className="text-xs font-semibold text-brand-700">
+          <p className="text-sm font-semibold text-brand-700">
             חודש הזכאות: {result.eligMonthLabel}
           </p>
           <p className="mt-0.5 text-xs text-ink-soft">
