@@ -30,7 +30,7 @@ const services = [
   },
   {
     name: "תכנון פיננסי בסיסי",
-    price: "החל מ-2,500 ₪",
+    price: "",
     highlighted: true,
     desc: "תהליך תכנון מלא שמחבר בין ההון שלכם למטרות שלכם.",
     features: [
@@ -42,7 +42,7 @@ const services = [
   },
   {
     name: "תכנון פיננסי מקיף",
-    price: "עד 5,000 ₪",
+    price: "",
     desc: "כל מה שכלול בתכנון הבסיסי, בהיקף רחב ומעמיק יותר למצבים מורכבים.",
     features: [
       "כל מרכיבי התכנון הבסיסי",
@@ -97,10 +97,6 @@ export default function ServicesPage() {
             </div>
           ))}
         </div>
-        <p className="container-page mt-8 text-center text-ink-soft">
-          העלות תלויה במורכבות ובהיקף התכנון הנדרש, ונעה בין 2,500 ₪ לתכנון פשוט
-          ועד 5,000 ₪ לתכנון מקיף.
-        </p>
       </section>
 
       <CTA
