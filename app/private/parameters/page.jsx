@@ -155,15 +155,6 @@ export default function ParametersPage() {
     });
     setDirty(true);
   }
-  function removeExemptYear(year) {
-    setCfg((c) => {
-      const next = { ...c.exemptByYear };
-      delete next[year];
-      return { ...c, exemptByYear: next };
-    });
-    setDirty(true);
-  }
-
   function addBracket() {
     setCfg((c) => ({
       ...c,
@@ -195,15 +186,6 @@ export default function ParametersPage() {
     });
     setDirty(true);
   }
-  function removeCpiMonth(key) {
-    setCfg((c) => {
-      const next = { ...c.cpiMonthly };
-      delete next[key];
-      return { ...c, cpiMonthly: next };
-    });
-    setDirty(true);
-  }
-
   function addWomenYear() {
     setCfg((c) => {
       const years = Object.keys(c.womenRetirementByBirthYear).sort();
@@ -442,8 +424,7 @@ export default function ParametersPage() {
               <tr className="border-b border-slate-200 text-right text-ink-soft">
                 <th className="py-2 pe-4 font-semibold">שנה</th>
                 <th className="py-2 pe-4 font-semibold">תקרה (ש''ח)</th>
-                <th className="py-2 pe-4 font-semibold">שיעור (%)</th>
-                <th className="py-2 font-semibold" aria-label="מחיקה"></th>
+                <th className="py-2 font-semibold">שיעור (%)</th>
               </tr>
             </thead>
             <tbody>
@@ -456,14 +437,11 @@ export default function ParametersPage() {
                       onChange={(v) => setExemptYear(y, "ceiling", v)}
                     />
                   </td>
-                  <td className="py-2 pe-4">
+                  <td className="py-2">
                     <NumberInput
                       value={cfg.exemptByYear[y].rate}
                       onChange={(v) => setExemptYear(y, "rate", v)}
                     />
-                  </td>
-                  <td className="py-2">
-                    <RemoveButton onClick={() => removeExemptYear(y)} />
                   </td>
                 </tr>
               ))}
@@ -554,16 +532,12 @@ export default function ParametersPage() {
         <div className="max-h-96 overflow-y-auto rounded-xl border border-slate-100">
           <div className="grid gap-3 p-3 sm:grid-cols-3 lg:grid-cols-4">
             {cpiKeys.map((k) => (
-              <div key={k}>
-                <div className="mb-1 flex items-center justify-between">
-                  <span className="text-sm font-semibold text-ink">{k}</span>
-                  <RemoveButton onClick={() => removeCpiMonth(k)} />
-                </div>
+              <Field key={k} label={k}>
                 <NumberInput
                   value={cfg.cpiMonthly[k]}
                   onChange={(v) => setCpi(k, v)}
                 />
-              </div>
+              </Field>
             ))}
           </div>
         </div>
