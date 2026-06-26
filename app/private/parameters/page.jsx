@@ -38,6 +38,33 @@ function NumberInput({ value, onChange, step = "any" }) {
   );
 }
 
+function RemoveButton({ onClick, title = "מחיקה" }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      aria-label={title}
+      className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-400 transition hover:border-red-300 hover:bg-red-50 hover:text-red-600"
+    >
+      ×
+    </button>
+  );
+}
+
+function AddButton({ onClick, children }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="inline-flex items-center gap-1 rounded-lg border border-dashed border-brand-300 px-3 py-2 text-sm font-semibold text-brand-700 transition hover:border-brand-500 hover:bg-brand-50"
+    >
+      <span className="text-base leading-none">+</span>
+      {children}
+    </button>
+  );
+}
+
 export default function ParametersPage() {
   // Start from published defaults so SSR/first render match; load any saved
   // preview override after mount.
@@ -108,6 +135,97 @@ export default function ParametersPage() {
       ...c,
       futureExemptRates: { ...c.futureExemptRates, [key]: val },
     }));
+    setDirty(true);
+  }
+
+  // ----- add / remove rows -----
+
+  // Add a year to a year-keyed map, copying the latest year's shape as a
+  // starting point. Refuses duplicates and non-4-digit years.
+  function addExemptYear() {
+    setCfg((c) => {
+      const years = Object.keys(c.exemptByYear).sort();
+      const next = String(Number(years[years.length - 1]) + 1);
+      if (c.exemptByYear[next]) return c;
+      const template = c.exemptByYear[years[years.length - 1]];
+      return {
+        ...c,
+        exemptByYear: { ...c.exemptByYear, [next]: { ...template } },
+      };
+    });
+    setDirty(true);
+  }
+  function removeExemptYear(year) {
+    setCfg((c) => {
+      const next = { ...c.exemptByYear };
+      delete next[year];
+      return { ...c, exemptByYear: next };
+    });
+    setDirty(true);
+  }
+
+  function addBracket() {
+    setCfg((c) => ({
+      ...c,
+      taxBrackets: [...c.taxBrackets, { ceil: null, rate: 0 }],
+    }));
+    setDirty(true);
+  }
+  function removeBracket(i) {
+    setCfg((c) => ({
+      ...c,
+      taxBrackets: c.taxBrackets.filter((_, idx) => idx !== i),
+    }));
+    setDirty(true);
+  }
+
+  function addCpiMonth() {
+    setCfg((c) => {
+      const keys = Object.keys(c.cpiMonthly).sort();
+      const last = keys[keys.length - 1]; // "YYYY-MM"
+      const [y, m] = last.split("-").map(Number);
+      const nm = m === 12 ? 1 : m + 1;
+      const ny = m === 12 ? y + 1 : y;
+      const next = `${ny}-${String(nm).padStart(2, "0")}`;
+      if (c.cpiMonthly[next] != null) return c;
+      return {
+        ...c,
+        cpiMonthly: { ...c.cpiMonthly, [next]: c.cpiMonthly[last] },
+      };
+    });
+    setDirty(true);
+  }
+  function removeCpiMonth(key) {
+    setCfg((c) => {
+      const next = { ...c.cpiMonthly };
+      delete next[key];
+      return { ...c, cpiMonthly: next };
+    });
+    setDirty(true);
+  }
+
+  function addWomenYear() {
+    setCfg((c) => {
+      const years = Object.keys(c.womenRetirementByBirthYear).sort();
+      const next = String(Number(years[years.length - 1]) + 1);
+      if (c.womenRetirementByBirthYear[next] != null) return c;
+      const template = c.womenRetirementByBirthYear[years[years.length - 1]];
+      return {
+        ...c,
+        womenRetirementByBirthYear: {
+          ...c.womenRetirementByBirthYear,
+          [next]: template,
+        },
+      };
+    });
+    setDirty(true);
+  }
+  function removeWomenYear(year) {
+    setCfg((c) => {
+      const next = { ...c.womenRetirementByBirthYear };
+      delete next[year];
+      return { ...c, womenRetirementByBirthYear: next };
+    });
     setDirty(true);
   }
 
@@ -324,7 +442,8 @@ export default function ParametersPage() {
               <tr className="border-b border-slate-200 text-right text-ink-soft">
                 <th className="py-2 pe-4 font-semibold">שנה</th>
                 <th className="py-2 pe-4 font-semibold">תקרה (ש''ח)</th>
-                <th className="py-2 font-semibold">שיעור (%)</th>
+                <th className="py-2 pe-4 font-semibold">שיעור (%)</th>
+                <th className="py-2 font-semibold" aria-label="מחיקה"></th>
               </tr>
             </thead>
             <tbody>
@@ -337,17 +456,21 @@ export default function ParametersPage() {
                       onChange={(v) => setExemptYear(y, "ceiling", v)}
                     />
                   </td>
-                  <td className="py-2">
+                  <td className="py-2 pe-4">
                     <NumberInput
                       value={cfg.exemptByYear[y].rate}
                       onChange={(v) => setExemptYear(y, "rate", v)}
                     />
+                  </td>
+                  <td className="py-2">
+                    <RemoveButton onClick={() => removeExemptYear(y)} />
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
+        <AddButton onClick={addExemptYear}>הוספת שנה</AddButton>
       </section>
 
       {/* tax brackets */}
@@ -361,7 +484,8 @@ export default function ParametersPage() {
             <thead>
               <tr className="border-b border-slate-200 text-right text-ink-soft">
                 <th className="py-2 pe-4 font-semibold">תקרת המדרגה (ש''ח)</th>
-                <th className="py-2 font-semibold">שיעור (0-1)</th>
+                <th className="py-2 pe-4 font-semibold">שיעור (0-1)</th>
+                <th className="py-2 font-semibold" aria-label="מחיקה"></th>
               </tr>
             </thead>
             <tbody>
@@ -383,17 +507,21 @@ export default function ParametersPage() {
                       }
                     />
                   </td>
-                  <td className="py-2">
+                  <td className="py-2 pe-4">
                     <NumberInput
                       value={b.rate}
                       onChange={(v) => setBracket(i, "rate", v)}
                     />
+                  </td>
+                  <td className="py-2">
+                    <RemoveButton onClick={() => removeBracket(i)} />
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
+        <AddButton onClick={addBracket}>הוספת מדרגה</AddButton>
       </section>
 
       {/* women retirement */}
@@ -401,35 +529,45 @@ export default function ParametersPage() {
         <h2 className="text-lg font-bold text-ink">גיל פרישה לנשים לפי שנת לידה</h2>
         <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-5">
           {womenYears.map((y) => (
-            <Field key={y} label={y}>
+            <div key={y}>
+              <div className="mb-1 flex items-center justify-between">
+                <span className="text-sm font-semibold text-ink">{y}</span>
+                <RemoveButton onClick={() => removeWomenYear(y)} />
+              </div>
               <NumberInput
                 value={cfg.womenRetirementByBirthYear[y]}
                 onChange={(v) => setWomen(y, v)}
               />
-            </Field>
+            </div>
           ))}
         </div>
+        <AddButton onClick={addWomenYear}>הוספת שנת לידה</AddButton>
       </section>
 
       {/* CPI */}
       <section className="card space-y-4">
         <h2 className="text-lg font-bold text-ink">מדד המחירים לצרכן (חודשי)</h2>
         <p className="text-xs text-ink-soft">
-          לעדכון שוטף: הוסיפו את החודשים החדשים בקובץ taxParams.json. כאן ניתן
-          לערוך ערכים קיימים.
+          לחיצה על &quot;הוספת חודש&quot; מוסיפה את החודש העוקב לחודש האחרון, עם
+          ערך התחלתי שניתן לערוך.
         </p>
         <div className="max-h-96 overflow-y-auto rounded-xl border border-slate-100">
           <div className="grid gap-3 p-3 sm:grid-cols-3 lg:grid-cols-4">
             {cpiKeys.map((k) => (
-              <Field key={k} label={k}>
+              <div key={k}>
+                <div className="mb-1 flex items-center justify-between">
+                  <span className="text-sm font-semibold text-ink">{k}</span>
+                  <RemoveButton onClick={() => removeCpiMonth(k)} />
+                </div>
                 <NumberInput
                   value={cfg.cpiMonthly[k]}
                   onChange={(v) => setCpi(k, v)}
                 />
-              </Field>
+              </div>
             ))}
           </div>
         </div>
+        <AddButton onClick={addCpiMonth}>הוספת חודש</AddButton>
       </section>
     </div>
   );
