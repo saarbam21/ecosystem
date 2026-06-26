@@ -524,10 +524,20 @@ export default function ParametersPage() {
 
       {/* CPI */}
       <section className="card space-y-4">
-        <h2 className="text-lg font-bold text-ink">מדד המחירים לצרכן (חודשי)</h2>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-lg font-bold text-ink">מדד המחירים לצרכן (חודשי)</h2>
+          <a
+            href="https://www.dekel.co.il/madad"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-semibold text-brand-700 transition hover:border-brand-300 hover:bg-brand-50"
+          >
+            בדיקת המדד באתר דקל ↗
+          </a>
+        </div>
         <p className="text-xs text-ink-soft">
           לחיצה על &quot;הוספת חודש&quot; מוסיפה את החודש העוקב לחודש האחרון, עם
-          ערך התחלתי שניתן לערוך.
+          ערך התחלתי שניתן לערוך. את ערך המדד ניתן לבדוק בקישור למעלה.
         </p>
         <div className="max-h-96 overflow-y-auto rounded-xl border border-slate-100">
           <div className="grid gap-3 p-3 sm:grid-cols-3 lg:grid-cols-4">
