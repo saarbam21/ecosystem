@@ -1,6 +1,14 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import {
+  DEFAULT_TAX_CONFIG,
+  useTaxConfig,
+  exemptForYear,
+  incomeTaxMonthly,
+  cpiAtMonth,
+  legalRetirementAge,
+} from "@/lib/taxConfig";
 
 const ILS = new Intl.NumberFormat("he-IL", {
   style: "currency",
@@ -39,124 +47,8 @@ const hebMonthLabel = (key) => {
   return `${HEB_MONTHS[m - 1]} ${y}`;
 };
 
-// Severance "use up" multiplier and the statutory divisor used in the
-// exempt-capital formula (תיקון 190 / קיבוע זכויות).
-const SEVERANCE_FACTOR = 1.35;
-const CAPITAL_DIVISOR = 180; // 180 months = 15 years
-
-// ===================================================================
-// ערכים הקבועים בחוק — ערוך כאן ידנית אם החקיקה משתנה.
-// ===================================================================
-// תקרת קצבה מזכה ושיעור הפטור לפי שנת הזכאות (שנת הגעה לגיל פרישה).
-const EXEMPT_BY_YEAR = {
-  2012: { ceiling: 8190, rate: 43.5 },
-  2013: { ceiling: 8310, rate: 43.5 },
-  2014: { ceiling: 8470, rate: 43.5 },
-  2015: { ceiling: 8460, rate: 43.5 },
-  2016: { ceiling: 8380, rate: 49 },
-  2017: { ceiling: 8360, rate: 49 },
-  2018: { ceiling: 8380, rate: 49 },
-  2019: { ceiling: 8480, rate: 49 },
-  2020: { ceiling: 8510, rate: 52 },
-  2021: { ceiling: 8460, rate: 52 },
-  2022: { ceiling: 8660, rate: 52 },
-  2023: { ceiling: 9120, rate: 52 },
-  2024: { ceiling: 9430, rate: 52 },
-  2025: { ceiling: 9430, rate: 57 },
-  2026: { ceiling: 9430, rate: 58 },
-};
-const EXEMPT_YEAR_MIN = 2012;
-const EXEMPT_YEAR_MAX = 2026;
-
-const CURRENT_CEILING = 9430; // תקרת קצבה מזכה (נכון לשנת 2026) — אינה צמודת מדד.
-
-// שיעור/תקרה לפי שנת הזכאות. התקרה אינה מוצמדת — נשארת התקרה הנוכחית.
-// השיעור: לפני 2012 — 35%; 2027 — 62.5%; 2028 ואילך — 67% (צפוי).
-function exemptForYear(year) {
-  const y = Math.round(year);
-  if (y < EXEMPT_YEAR_MIN) return { ceiling: 8190, rate: 35, rateEstimate: false };
-  if (y <= EXEMPT_YEAR_MAX) return { ...EXEMPT_BY_YEAR[y], rateEstimate: false };
-  const rate = y === 2027 ? 62.5 : 67;
-  return { ceiling: CURRENT_CEILING, rate, rateEstimate: true };
-}
-
-// ניצול הפיצויים הפטורים מוגבל ל-35% × תקרת הפטור × 180.
-const SEVERANCE_OFFSET_CAP_RATE = 0.35;
-// מעבר ל-32 שנות עבודה נלקח לקיזוז רק החלק היחסי של 32 מתוך סך השנים.
-const SEVERANCE_YEARS_CAP = 32;
-
-// הוראת מעבר: פיצויים פטורים שנמשכו לפני שנה זו, וחלפו מאז לפחות
-// מספר השנים שלהלן ועד שנת הזכאות — אינם פוגעים בפטור.
-const TRANSITION_BEFORE_YEAR = 2012;
-const TRANSITION_YEARS = 15;
-// ===================================================================
-
-// Israeli CPI (מדד המחירים לצרכן), base 2006 = 100, monthly. Source: dekel.co.il.
-// Used for actual historical indexation of severance grants by withdrawal month.
-const CPI_MONTHLY = {
-  "2012-01": 115.9715, "2012-02": 115.9715, "2012-03": 116.4176, "2012-04": 117.4212,
-  "2012-05": 117.4212, "2012-06": 117.0867, "2012-07": 117.1982, "2012-08": 118.4248,
-  "2012-09": 118.4248, "2012-10": 118.2018, "2012-11": 117.6442, "2012-12": 117.8672,
-  "2013-01": 117.6616, "2013-02": 117.6616, "2013-03": 117.8962, "2013-04": 118.3655,
-  "2013-05": 118.4828, "2013-06": 119.4213, "2013-07": 119.7732, "2013-08": 120.0078,
-  "2013-09": 120.0078, "2013-10": 120.3597, "2013-11": 119.8905, "2013-12": 120.0078,
-  "2014-01": 119.3039, "2014-02": 119.0693, "2014-03": 119.4213, "2014-04": 119.5386,
-  "2014-05": 119.6559, "2014-06": 120.0078, "2014-07": 120.1251, "2014-08": 120.0078,
-  "2014-09": 119.6559, "2014-10": 120.0078, "2014-11": 119.7732, "2014-12": 119.7732,
-  "2015-01": 118.6986, "2015-02": 117.861, "2015-03": 118.22, "2015-04": 118.9379,
-  "2015-05": 119.1772, "2015-06": 119.5362, "2015-07": 119.7755, "2015-08": 119.5362,
-  "2015-09": 119.0576, "2015-10": 119.1772, "2015-11": 118.6986, "2015-12": 118.579,
-  "2016-01": 117.9807, "2016-02": 117.6217, "2016-03": 117.3824, "2016-04": 117.861,
-  "2016-05": 118.22, "2016-06": 118.579, "2016-07": 119.0576, "2016-08": 118.6986,
-  "2016-09": 118.579, "2016-10": 118.8183, "2016-11": 118.3397, "2016-12": 118.3397,
-  "2017-01": 118.103, "2017-02": 118.103, "2017-03": 118.458, "2017-04": 118.6947,
-  "2017-05": 119.168, "2017-06": 118.3397, "2017-07": 118.2213, "2017-08": 118.5763,
-  "2017-09": 118.6947, "2017-10": 119.0497, "2017-11": 118.6947, "2017-12": 118.813,
-  "2018-01": 118.2213, "2018-02": 118.3397, "2018-03": 118.6947, "2018-04": 119.168,
-  "2018-05": 119.7597, "2018-06": 119.8781, "2018-07": 119.8781, "2018-08": 119.9964,
-  "2018-09": 120.1148, "2018-10": 120.4698, "2018-11": 120.1148, "2018-12": 119.7597,
-  "2019-01": 119.6426, "2019-02": 119.7621, "2019-03": 120.3597, "2019-04": 120.7183,
-  "2019-05": 121.5549, "2019-06": 120.8378, "2019-07": 120.4792, "2019-08": 120.7183,
-  "2019-09": 120.4792, "2019-10": 120.9573, "2019-11": 120.4792, "2019-12": 120.4792,
-  "2020-01": 120.0011, "2020-02": 119.8816, "2020-03": 120.3597, "2020-04": 120.0011,
-  "2020-05": 119.6426, "2020-06": 119.5231, "2020-07": 119.7621, "2020-08": 119.7621,
-  "2020-09": 119.6426, "2020-10": 120.0011, "2020-11": 119.7621, "2020-12": 119.6426,
-  "2021-01": 119.522, "2021-02": 119.8816, "2021-03": 120.6009, "2021-04": 120.9606,
-  "2021-05": 121.4401, "2021-06": 121.56, "2021-07": 122.0395, "2021-08": 122.3991,
-  "2021-09": 122.6389, "2021-10": 122.7588, "2021-11": 122.6389, "2021-12": 122.9985,
-  "2022-01": 123.2383, "2022-02": 124.0775, "2022-03": 124.7968, "2022-04": 125.7558,
-  "2022-05": 126.4751, "2022-06": 126.9546, "2022-07": 128.3932, "2022-08": 128.0336,
-  "2022-09": 128.2733, "2022-10": 128.9926, "2022-11": 129.1125, "2022-12": 129.4722,
-  "2023-01": 129.8746, "2023-02": 130.5094, "2023-03": 131.0172, "2023-04": 132.0328,
-  "2023-05": 132.2867, "2023-06": 132.2867, "2023-07": 132.6676, "2023-08": 133.302,
-  "2023-09": 133.1754, "2023-10": 133.8102, "2023-11": 133.4293, "2023-12": 133.3024,
-  "2024-01": 133.3024, "2024-02": 133.8102, "2024-03": 134.5719, "2024-04": 135.7145,
-  "2024-05": 135.9684, "2024-06": 136.0954, "2024-07": 136.8571, "2024-08": 138.1266,
-  "2024-09": 137.8727, "2024-10": 138.5075, "2024-11": 137.9997, "2024-12": 137.6188,
-  "2025-01": 138.3945, "2025-02": 138.3945, "2025-03": 139.076, "2025-04": 140.576,
-  "2025-05": 140.167, "2025-06": 140.5761, "2025-07": 141.121, "2025-08": 142.076,
-  "2025-09": 141.2579, "2025-10": 141.9396, "2025-11": 141.257, "2025-12": 141.257,
-  "2026-01": 140.8488, "2026-02": 141.1215, "2026-03": 141.6669, "2026-04": 143.303,
-  "2026-05": 142.894,
-};
-const CPI_MONTH_KEYS = Object.keys(CPI_MONTHLY);
-const CPI_FIRST_MONTH = CPI_MONTH_KEYS[0];
-const CPI_LATEST_KEY = CPI_MONTH_KEYS[CPI_MONTH_KEYS.length - 1];
-const CPI_LATEST = CPI_MONTHLY[CPI_LATEST_KEY];
-
-// Index level for a "YYYY-MM" month, clamped to the known range. Severance is
-// indexed up to the latest known index only — no forward projection.
-function cpiAtMonth(monthKey) {
-  if (CPI_MONTHLY[monthKey] != null) return CPI_MONTHLY[monthKey];
-  if (!monthKey || monthKey < CPI_FIRST_MONTH) return CPI_MONTHLY[CPI_FIRST_MONTH];
-  if (monthKey > CPI_LATEST_KEY) return CPI_LATEST;
-  let v = CPI_MONTHLY[CPI_FIRST_MONTH];
-  for (const k of CPI_MONTH_KEYS) {
-    if (k <= monthKey) v = CPI_MONTHLY[k];
-    else break;
-  }
-  return v;
-}
+// Statutory parameters (ceilings, exempt rates, CPI table, brackets, ...) live
+// in lib/taxParams.json and are consumed via the config from useTaxConfig().
 
 function num(v) {
   const n = parseFloat(String(v).replace(/,/g, ""));
@@ -177,59 +69,6 @@ function formatAge(age) {
   const m = Math.round((age - y) * 12);
   if (m === 0) return `${y}`;
   return `${y} ו-${m} ח׳`;
-}
-
-// גיל פרישה חוקי — גברים 67; נשים עולה בהדרגה לפי שנת לידה.
-const WOMEN_RETIREMENT_BY_BIRTH_YEAR = {
-  1960: 62 + 4 / 12,
-  1961: 62 + 8 / 12,
-  1962: 63,
-  1963: 63 + 3 / 12,
-  1964: 63 + 6 / 12,
-  1965: 63 + 9 / 12,
-  1966: 64,
-  1967: 64 + 3 / 12,
-  1968: 64 + 6 / 12,
-  1969: 64 + 9 / 12,
-};
-
-function legalRetirementAge(gender, birthYear) {
-  if (gender === "male") return 67;
-  if (birthYear <= 1959) return 62;
-  if (birthYear >= 1970) return 65;
-  return WOMEN_RETIREMENT_BY_BIRTH_YEAR[birthYear] ?? 65;
-}
-
-// --- Israeli pension tax assumptions (defaults; editable in the UI) ---
-// Monthly income-tax brackets (2025). Each: up to `ceil` taxed at `rate`.
-const TAX_BRACKETS = [
-  { ceil: 7010, rate: 0.1 },
-  { ceil: 10060, rate: 0.14 },
-  { ceil: 16150, rate: 0.2 },
-  { ceil: 22440, rate: 0.31 },
-  { ceil: 46690, rate: 0.35 },
-  { ceil: 60130, rate: 0.47 },
-  { ceil: Infinity, rate: 0.5 },
-];
-
-const DEFAULTS = {
-  pointValue: 242, // שווי נקודת זיכוי (חודשי)
-  pointsMale: 2.25,
-  pointsFemale: 2.75,
-  indexFuture: 2, // הנחת מדד שנתי צפוי קדימה (%)
-};
-
-// Monthly income tax before credits, given monthly taxable income.
-function incomeTaxMonthly(taxable) {
-  let tax = 0;
-  let prev = 0;
-  for (const b of TAX_BRACKETS) {
-    if (taxable <= prev) break;
-    const slice = Math.min(taxable, b.ceil) - prev;
-    tax += slice * b.rate;
-    prev = b.ceil;
-  }
-  return tax;
 }
 
 let pid = 0;
@@ -393,11 +232,14 @@ export default function NetPensionCalculator() {
   const [severanceWithdrawn, setSeveranceWithdrawn] = useState(false);
   const [severances, setSeverances] = useState([newSeverance()]);
 
+  // Statutory parameters (with any admin preview override applied).
+  const cfg = useTaxConfig();
+
   // Editable tax assumptions.
   const [tax, setTax] = useState({
-    pointValue: String(DEFAULTS.pointValue),
-    points: String(DEFAULTS.pointsMale),
-    indexFuture: String(DEFAULTS.indexFuture),
+    pointValue: String(DEFAULT_TAX_CONFIG.defaults.pointValue),
+    points: String(DEFAULT_TAX_CONFIG.defaults.pointsMale),
+    indexFuture: String(DEFAULT_TAX_CONFIG.defaults.indexFuture),
   });
   const [showAssumptions, setShowAssumptions] = useState(false);
   const [showExemptDetail, setShowExemptDetail] = useState(false);
@@ -409,7 +251,7 @@ export default function NetPensionCalculator() {
     setRetireAge(g === "male" ? 67 : 65);
     setTax((t) => ({
       ...t,
-      points: String(g === "male" ? DEFAULTS.pointsMale : DEFAULTS.pointsFemale),
+      points: String(g === "male" ? cfg.defaults.pointsMale : cfg.defaults.pointsFemale),
     }));
   };
 
@@ -429,7 +271,12 @@ export default function NetPensionCalculator() {
   const result = useMemo(() => {
     const birthYear = parseInt(String(birthDate).slice(0, 4), 10) || CURRENT_YEAR - 50;
     const currentAge = Math.max(0, (monthIndex(CURRENT_MONTH_KEY) - monthIndex(birthDate)) / 12);
-    const legalAge = legalRetirementAge(gender, birthYear);
+    const legalAge = legalRetirementAge(cfg, gender, birthYear);
+
+    // Latest known CPI month/level (no forward projection beyond it).
+    const cpiKeys = Object.keys(cfg.cpiMonthly);
+    const cpiLatestKey = cpiKeys[cpiKeys.length - 1];
+    const cpiLatest = cfg.cpiMonthly[cpiLatestKey];
 
     // Precise months of reaching legal age and of starting the pension.
     const legalRetMonthKey = addMonthsKey(birthDate, Math.round(legalAge * 12));
@@ -448,12 +295,12 @@ export default function NetPensionCalculator() {
       ceiling: exemptCeiling,
       rate: exemptRate,
       rateEstimate,
-    } = exemptForYear(eligibilityYear);
+    } = exemptForYear(cfg, eligibilityYear);
 
     // Forward-index factor: from the latest known CPI month to the eligibility
     // month, using the future-index assumption.
-    const idxToday = CPI_LATEST;
-    const monthsAhead = monthIndex(eligMonthKey) - monthIndex(CPI_LATEST_KEY);
+    const idxToday = cpiLatest;
+    const monthsAhead = monthIndex(eligMonthKey) - monthIndex(cpiLatestKey);
     const yearsAhead = Math.max(0, monthsAhead / 12);
     const forwardFactor = Math.pow(1 + futureRate / 100, yearsAhead);
 
@@ -483,15 +330,15 @@ export default function NetPensionCalculator() {
       const [yStr, mStr] = raw.split("-");
       const wy = parseInt(yStr, 10) || CURRENT_YEAR;
       const monthKey = `${wy}-${(mStr || "01").padStart(2, "0")}`;
-      const idxAtWithdraw = cpiAtMonth(monthKey);
+      const idxAtWithdraw = cpiAtMonth(cfg, monthKey);
       const actualFactor = idxAtWithdraw > 0 ? idxToday / idxAtWithdraw : 1;
       const indexFactor = actualFactor * forwardFactor;
       const yearsWorked = num(s.yearsWorked);
       const propFactor =
-        yearsWorked > SEVERANCE_YEARS_CAP ? SEVERANCE_YEARS_CAP / yearsWorked : 1;
-      const preIndex = amount * SEVERANCE_FACTOR * propFactor;
+        yearsWorked > cfg.severanceYearsCap ? cfg.severanceYearsCap / yearsWorked : 1;
+      const preIndex = amount * cfg.severanceFactor * propFactor;
       const exemptByTransition =
-        wy < TRANSITION_BEFORE_YEAR && eligibilityYear - wy >= TRANSITION_YEARS;
+        wy < cfg.transitionBeforeYear && eligibilityYear - wy >= cfg.transitionYears;
       const used = exemptByTransition ? 0 : preIndex * indexFactor;
       return {
         id: s.id,
@@ -510,13 +357,13 @@ export default function NetPensionCalculator() {
     const severanceUsedRaw = severanceLines.reduce((s, l) => s + l.used, 0);
 
     // Exempt-capital formula and the 35% cap on the severance offset.
-    const exemptCapital = exemptCeiling * (exemptRate / 100) * CAPITAL_DIVISOR;
-    const offsetCap = SEVERANCE_OFFSET_CAP_RATE * exemptCeiling * CAPITAL_DIVISOR;
+    const exemptCapital = exemptCeiling * (exemptRate / 100) * cfg.capitalDivisor;
+    const offsetCap = cfg.severanceOffsetCapRate * exemptCeiling * cfg.capitalDivisor;
     const severanceUsedTotal = Math.min(severanceUsedRaw, offsetCap);
     const offsetIsCapped = severanceUsedRaw > offsetCap + 0.5;
     const offset = applyOffset ? severanceUsedTotal : 0;
     const remainingCapital = Math.max(0, exemptCapital - offset);
-    const monthlyExemption = remainingCapital / CAPITAL_DIVISOR;
+    const monthlyExemption = remainingCapital / cfg.capitalDivisor;
 
     // The entitling-pension exemption requires rights-fixing and is only
     // possible from the legal retirement age; drawing earlier → no exemption.
@@ -527,7 +374,7 @@ export default function NetPensionCalculator() {
     const netFor = (exemptCap) => {
       const exemptApplied = Math.min(entitlingPension, exemptCap);
       const taxable = Math.max(0, entitlingPension - exemptApplied);
-      const taxBeforeCredits = incomeTaxMonthly(taxable);
+      const taxBeforeCredits = incomeTaxMonthly(cfg, taxable);
       const taxDue = Math.max(0, taxBeforeCredits - creditValue);
       const net = grossPension - taxDue;
       const effRate = grossPension > 0 ? taxDue / grossPension : 0;
@@ -573,6 +420,7 @@ export default function NetPensionCalculator() {
       netWithout: noExemption.net,
     };
   }, [
+    cfg,
     portfolios,
     severances,
     tax,
@@ -852,7 +700,7 @@ export default function NetPensionCalculator() {
                             <div>
                               סכום לפני הצמדה:{" "}
                               <bdi dir="ltr" className="font-medium text-ink">
-                                {fmtNum(sl.amount)} × {SEVERANCE_FACTOR}
+                                {fmtNum(sl.amount)} × {cfg.severanceFactor}
                                 {sl.propFactor < 1
                                   ? ` × ${sl.propFactor.toFixed(3)}`
                                   : ""}{" "}

@@ -7,8 +7,10 @@ import WhatsAppFloat from "./WhatsAppFloat";
 
 export default function SiteChrome({ children }) {
   const pathname = usePathname();
-  // Standalone/embeddable pages render without the site header, footer and nav.
-  const bare = pathname?.startsWith("/embed");
+  // Standalone/embeddable pages and the private admin area render without the
+  // public site header, footer and nav.
+  const bare =
+    pathname?.startsWith("/embed") || pathname?.startsWith("/private");
 
   if (bare) {
     return (
