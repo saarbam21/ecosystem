@@ -553,9 +553,14 @@ export default function ParametersPage() {
         </div>
         <AddButton onClick={addCpiMonth}>הוספת חודש</AddButton>
 
-        <div className="mt-2 rounded-xl border border-brand-100 bg-brand-50/60 p-4 text-sm text-ink-soft">
-          <h3 className="mb-2 font-bold text-ink">איך מפרסמים את השינויים?</h3>
-          <ol className="list-decimal space-y-1 pe-5">
+        <details
+          open
+          className="mt-2 rounded-xl border border-brand-100 bg-brand-50/60 p-4 text-sm text-ink-soft"
+        >
+          <summary className="cursor-pointer font-bold text-ink">
+            איך מפרסמים את השינויים?
+          </summary>
+          <ol className="mt-2 list-decimal space-y-1 pe-5">
             <li>
               לוחצים על <span className="font-semibold">&quot;תצוגה מקדימה&quot;</span> ובודקים
               שהמחשבונים מציגים את הערכים הנכונים.
@@ -577,7 +582,7 @@ export default function ParametersPage() {
             </li>
             <li>כעבור כ-2 דקות האתר החי יציג את הערכים החדשים.</li>
           </ol>
-        </div>
+        </details>
       </section>
     </div>
   );
