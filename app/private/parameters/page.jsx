@@ -552,6 +552,32 @@ export default function ParametersPage() {
           </div>
         </div>
         <AddButton onClick={addCpiMonth}>הוספת חודש</AddButton>
+
+        <div className="mt-2 rounded-xl border border-brand-100 bg-brand-50/60 p-4 text-sm text-ink-soft">
+          <h3 className="mb-2 font-bold text-ink">איך מפרסמים את השינויים?</h3>
+          <ol className="list-decimal space-y-1 pe-5">
+            <li>
+              לוחצים על <span className="font-semibold">&quot;תצוגה מקדימה&quot;</span> ובודקים
+              שהמחשבונים מציגים את הערכים הנכונים.
+            </li>
+            <li>
+              לוחצים על <span className="font-semibold">&quot;ייצוא קובץ לפרסום&quot;</span> —
+              הקובץ <code className="rounded bg-white px-1 font-mono">taxParams.json</code> יורד
+              לתיקיית ההורדות.
+            </li>
+            <li>
+              מעבירים את הקובץ לתוך תיקיית{" "}
+              <code className="rounded bg-white px-1 font-mono">lib</code> של הפרויקט (מחליפים
+              את הקובץ הקיים).
+            </li>
+            <li>
+              לוחצים פעמיים על הקובץ{" "}
+              <code className="rounded bg-white px-1 font-mono">publish.bat</code> שבתיקיית
+              הפרויקט. הוא יעלה את השינוי ויפרסם אותם.
+            </li>
+            <li>כעבור כ-2 דקות האתר החי יציג את הערכים החדשים.</li>
+          </ol>
+        </div>
       </section>
     </div>
   );
