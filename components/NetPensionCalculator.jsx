@@ -297,10 +297,13 @@ export default function NetPensionCalculator() {
       rateEstimate,
     } = exemptForYear(cfg, eligibilityYear);
 
-    // Forward-index factor: from the latest known CPI month to the eligibility
-    // month, using the future-index assumption.
-    const idxToday = cpiLatest;
+    // Indexation target = the eligibility month. If it is in the future we
+    // index by actual CPI up to today, then project forward by the future-index
+    // assumption. If it is already in the past we stop at the eligibility
+    // month's actual CPI (no forward projection, and not all the way to today).
     const monthsAhead = monthIndex(eligMonthKey) - monthIndex(cpiLatestKey);
+    const eligInPast = monthsAhead < 0;
+    const idxToday = eligInPast ? cpiAtMonth(cfg, eligMonthKey) : cpiLatest;
     const yearsAhead = Math.max(0, monthsAhead / 12);
     const forwardFactor = Math.pow(1 + futureRate / 100, yearsAhead);
 
@@ -401,6 +404,7 @@ export default function NetPensionCalculator() {
       futureRate,
       forwardFactor,
       yearsAhead,
+      eligInPast,
       exemptCeiling,
       rateEstimate,
       exemptRate,
@@ -713,7 +717,9 @@ export default function NetPensionCalculator() {
                             <div>
                               הצמדה: מדד בסיס (חודש המשיכה){" "}
                               <bdi dir="ltr">{sl.idxAtWithdraw.toFixed(2)}</bdi> →
-                              מדד נוכחי{" "}
+                              {result.eligInPast
+                                ? ` מדד מועד הזכאות (${result.eligMonthLabel}) `
+                                : " מדד נוכחי "}
                               <bdi dir="ltr">{result.idxToday.toFixed(2)}</bdi>
                               {result.yearsAhead > 0
                                 ? ` → מדד צפוי ${result.futureRate}% עד ${result.eligMonthLabel}`
