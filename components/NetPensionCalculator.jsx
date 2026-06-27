@@ -297,13 +297,15 @@ export default function NetPensionCalculator() {
       rateEstimate,
     } = exemptForYear(cfg, eligibilityYear);
 
-    // Indexation target = the eligibility month. If it is in the future we
-    // index by actual CPI up to today, then project forward by the future-index
-    // assumption. If it is already in the past we stop at the eligibility
-    // month's actual CPI (no forward projection, and not all the way to today).
-    const monthsAhead = monthIndex(eligMonthKey) - monthIndex(cpiLatestKey);
+    // By law the severance indexation target is always JANUARY of the
+    // eligibility year. If that January is in the future we index by actual CPI
+    // up to today, then project forward by the future-index assumption; if it is
+    // in the past we stop at that January's actual CPI.
+    const indexMonthKey = `${eligibilityYear}-01`;
+    const indexMonthLabel = hebMonthLabel(indexMonthKey);
+    const monthsAhead = monthIndex(indexMonthKey) - monthIndex(cpiLatestKey);
     const eligInPast = monthsAhead < 0;
-    const idxToday = eligInPast ? cpiAtMonth(cfg, eligMonthKey) : cpiLatest;
+    const idxToday = eligInPast ? cpiAtMonth(cfg, indexMonthKey) : cpiLatest;
     const yearsAhead = Math.max(0, monthsAhead / 12);
     const forwardFactor = Math.pow(1 + futureRate / 100, yearsAhead);
 
@@ -405,6 +407,7 @@ export default function NetPensionCalculator() {
       forwardFactor,
       yearsAhead,
       eligInPast,
+      indexMonthLabel,
       exemptCeiling,
       rateEstimate,
       exemptRate,
@@ -718,11 +721,11 @@ export default function NetPensionCalculator() {
                               הצמדה: מדד בסיס (חודש המשיכה){" "}
                               <bdi dir="ltr">{sl.idxAtWithdraw.toFixed(2)}</bdi> →
                               {result.eligInPast
-                                ? ` מדד מועד הזכאות (${result.eligMonthLabel}) `
+                                ? ` מדד מועד הזכאות (${result.indexMonthLabel}) `
                                 : " מדד נוכחי "}
                               <bdi dir="ltr">{result.idxToday.toFixed(2)}</bdi>
                               {result.yearsAhead > 0
-                                ? ` → מדד צפוי ${result.futureRate}% עד ${result.eligMonthLabel}`
+                                ? ` → מדד צפוי ${result.futureRate}% עד ${result.indexMonthLabel}`
                                 : ""}{" "}
                               · מקדם הצמדה כולל{" "}
                               <bdi dir="ltr">{sl.indexFactor.toFixed(4)}</bdi>
