@@ -325,22 +325,44 @@ export default function NetPensionCalculator() {
     const grossPension = lines.reduce((s, l) => s + l.gross, 0);
     const recognizedPension = lines.reduce((s, l) => s + l.recognizedPension, 0);
 
-    // Exempt severance "used up": amount × 1.35 × (32/years if over 32),
-    // indexed by actual CPI from the withdrawal month to today, then by the
-    // future-index assumption up to the eligibility month.
+    // Exempt severance "used up": amount × 1.35 × indexation, with the 32-year
+    // cap applied ACROSS all employers — only the most recent 32 work-years
+    // count. Years are allocated to grants newest-first; older years beyond 32
+    // get a reduced (or zero) share.
     const applyOffset = kibuaDone && severanceWithdrawn;
-    const severanceLines = severances.map((s) => {
-      const amount = num(s.amount);
+    const sevBase = severances.map((s) => {
       const raw = s.month || CURRENT_MONTH_KEY;
       const [yStr, mStr] = raw.split("-");
       const wy = parseInt(yStr, 10) || CURRENT_YEAR;
-      const monthKey = `${wy}-${(mStr || "01").padStart(2, "0")}`;
+      return {
+        s,
+        amount: num(s.amount),
+        monthKey: `${wy}-${(mStr || "01").padStart(2, "0")}`,
+        wy,
+        yearsWorked: num(s.yearsWorked),
+      };
+    });
+    const totalYears = sevBase.reduce((t, b) => t + b.yearsWorked, 0);
+    const yearsCounted = {};
+    if (totalYears > cfg.severanceYearsCap) {
+      let remaining = cfg.severanceYearsCap;
+      [...sevBase]
+        .sort((a, b) => monthIndex(b.monthKey) - monthIndex(a.monthKey))
+        .forEach((b) => {
+          const allowed = Math.max(0, Math.min(b.yearsWorked, remaining));
+          yearsCounted[b.s.id] = allowed;
+          remaining -= allowed;
+        });
+    }
+    const severanceLines = sevBase.map(({ s, amount, monthKey, wy, yearsWorked }) => {
       const idxAtWithdraw = cpiAtMonth(cfg, monthKey);
       const actualFactor = idxAtWithdraw > 0 ? idxToday / idxAtWithdraw : 1;
       const indexFactor = actualFactor * forwardFactor;
-      const yearsWorked = num(s.yearsWorked);
-      const propFactor =
-        yearsWorked > cfg.severanceYearsCap ? cfg.severanceYearsCap / yearsWorked : 1;
+      const counted =
+        totalYears > cfg.severanceYearsCap && yearsWorked > 0
+          ? yearsCounted[s.id]
+          : yearsWorked;
+      const propFactor = yearsWorked > 0 ? counted / yearsWorked : 1;
       const preIndex = amount * cfg.severanceFactor * propFactor;
       const exemptByTransition =
         wy < cfg.transitionBeforeYear && eligibilityYear - wy >= cfg.transitionYears;
@@ -353,6 +375,7 @@ export default function NetPensionCalculator() {
         actualFactor,
         indexFactor,
         yearsWorked,
+        yearsCounted: counted,
         propFactor,
         preIndex,
         used,
@@ -714,7 +737,7 @@ export default function NetPensionCalculator() {
                                 = {fmtNum(sl.preIndex)}
                               </bdi>
                               {sl.propFactor < 1
-                                ? ` (32/${sl.yearsWorked} שנות עבודה)`
+                                ? ` (${Math.round(sl.yearsCounted)} מתוך ${sl.yearsWorked} שנים נחשבות — תקרת 32 שנה)`
                                 : ""}
                             </div>
                             <div>
