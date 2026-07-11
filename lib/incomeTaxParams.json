@@ -1,0 +1,24 @@
+{
+  "_comment": "פרמטרים למחשבון מס הכנסה ליחיד (דוח שנתי / החזר מס). כל הסכומים בש''ח לשנה, שיעורים כשבר עשרוני. עורכים כאן ומפרסמים מחדש. מדרגות המס ונקודת הזיכוי נכונות לשנת המס 2025.",
+  "year": 2025,
+  "pointValueAnnual": 2904,
+  "pointsMale": 2.25,
+  "pointsFemale": 2.75,
+  "taxBrackets": [
+    { "ceil": 84120, "rate": 0.1 },
+    { "ceil": 120720, "rate": 0.14 },
+    { "ceil": 193800, "rate": 0.2 },
+    { "ceil": 269280, "rate": 0.31 },
+    { "ceil": 560280, "rate": 0.35 },
+    { "ceil": 721560, "rate": 0.47 },
+    { "ceil": null, "rate": 0.47 }
+  ],
+  "surtaxThreshold": 721560,
+  "surtaxRate": 0.03,
+  "capitalRates": {
+    "dividend": 0.25,
+    "interest": 0.25,
+    "capitalgain": 0.25,
+    "other": 0.25
+  }
+}
