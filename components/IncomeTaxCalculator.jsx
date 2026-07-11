@@ -32,7 +32,7 @@ function formatThousands(str) {
   return intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ",") + dec;
 }
 
-// The capital-income categories reported on a 867.
+// The fixed-rate capital categories reported on a 867.
 const CAPITAL_CATEGORIES = [
   { k: "dividend", t: "דיבידנד" },
   { k: "interest", t: "ריבית" },
@@ -42,6 +42,13 @@ const CAPITAL_CATEGORIES = [
 const categoryLabel = (k) =>
   CAPITAL_CATEGORIES.find((c) => c.k === k)?.t ?? "הון";
 
+// "other" document classification.
+const OTHER_KINDS = [
+  { k: "ordinary", t: "יגיעה אישית (מדרגות מס)" },
+  { k: "fixed", t: "הון בשיעור קבוע" },
+  { k: "passive", t: "שאינה מיגיעה אישית (שיעור שולי)" },
+];
+
 // ----- documents & taxpayers -----
 
 let docId = 0;
@@ -50,7 +57,8 @@ const newDoc = (type = "106") => {
   if (type === "106") return { ...base, employer: "", income: "", withheld: "" };
   if (type === "867")
     return { ...base, category: "dividend", income: "", withheld: "", rate: "" };
-  // "other": free-form income line, ordinary (personal exertion) or capital.
+  // "other": free-form income line — personal exertion, fixed-rate capital, or
+  // non-exertion income taxed at the marginal rate.
   return { ...base, label: "", kind: "ordinary", income: "", withheld: "", rate: "" };
 };
 
@@ -80,14 +88,17 @@ function capitalRateFor(cfg, category, rate) {
   return cfg.capitalRates[category] ?? cfg.capitalRates.other;
 }
 
-// Split a person's documents into personal-exertion (יגיעה אישית) and
-// non-exertion (הון) buckets.
+// Split a person's documents into three buckets:
+//  - exertion: personal-exertion income (יגיעה אישית) — taxed on the brackets.
+//  - fixed: capital income with a statutory flat rate (dividend/interest/gains).
+//  - passive: non-exertion income WITHOUT a special rate (e.g. marginal-track
+//    rental) — taxed at a marginal rate (the higher spouse's, in couple mode).
 function splitPersonDocs(cfg, person) {
   let exertionIncome = 0;
   let exertionWithheld = 0;
-  let nonExertionIncome = 0;
-  let nonExertionWithheld = 0;
-  const nonExertionLines = [];
+  let passiveIncome = 0;
+  let passiveWithheld = 0;
+  const fixedLines = [];
 
   for (const d of person.docs) {
     const income = num(d.income);
@@ -96,68 +107,73 @@ function splitPersonDocs(cfg, person) {
       exertionIncome += income;
       exertionWithheld += withheld;
     } else if (d.type === "867") {
-      nonExertionIncome += income;
-      nonExertionWithheld += withheld;
-      nonExertionLines.push({
+      fixedLines.push({
         id: d.id,
         category: d.category,
         income,
         rate: capitalRateFor(cfg, d.category, d.rate),
         withheld,
       });
-    } else if (d.kind === "capital") {
-      nonExertionIncome += income;
-      nonExertionWithheld += withheld;
-      nonExertionLines.push({
+    } else if (d.kind === "fixed") {
+      fixedLines.push({
         id: d.id,
         category: "other",
         income,
         rate: capitalRateFor(cfg, "other", d.rate),
         withheld,
       });
+    } else if (d.kind === "passive") {
+      passiveIncome += income;
+      passiveWithheld += withheld;
     } else {
       exertionIncome += income;
       exertionWithheld += withheld;
     }
   }
+  const fixedIncome = fixedLines.reduce((s, l) => s + l.income, 0);
+  const fixedTax = fixedLines.reduce((s, l) => s + l.income * l.rate, 0);
+  const fixedWithheld = fixedLines.reduce((s, l) => s + l.withheld, 0);
   return {
     exertionIncome,
     exertionWithheld,
-    nonExertionIncome,
-    nonExertionWithheld,
-    nonExertionLines,
+    passiveIncome,
+    passiveWithheld,
+    fixedLines,
+    fixedIncome,
+    fixedTax,
+    fixedWithheld,
   };
 }
 
-// A single taxpayer (individual mode): taxed on own brackets, credit points and
-// surtax threshold. Capital income keeps its own flat rate.
+// Individual mode: everything on the person's own brackets / flat rates.
+// Non-exertion marginal income is added to the bracket base (a single filer has
+// no spouse to attribute it to).
 function computePerson(cfg, person, shared) {
   const s = splitPersonDocs(cfg, person);
-  const capitalTax = s.nonExertionLines.reduce((t, l) => t + l.income * l.rate, 0);
-
-  const ordinaryBracketTax = annualIncomeTax(cfg, s.exertionIncome);
+  const bracketBase = s.exertionIncome + s.passiveIncome;
+  const ordinaryBracketTax = annualIncomeTax(cfg, bracketBase);
   const credit = num(person.points) * shared.pointValue;
   const creditUsed = Math.min(credit, ordinaryBracketTax);
   const ordinaryAfterCredit = Math.max(0, ordinaryBracketTax - credit);
 
-  const totalTaxable = s.exertionIncome + s.nonExertionIncome;
+  const totalTaxable = bracketBase + s.fixedIncome;
   const surtax = shared.surtaxRate * Math.max(0, totalTaxable - shared.surtaxThreshold);
 
-  const liability = ordinaryAfterCredit + capitalTax + surtax;
-  const withheldTotal = s.exertionWithheld + s.nonExertionWithheld;
+  const liability = ordinaryAfterCredit + s.fixedTax + surtax;
+  const withheldTotal = s.exertionWithheld + s.passiveWithheld + s.fixedWithheld;
   const balance = withheldTotal - liability;
   const effRate = totalTaxable > 0 ? liability / totalTaxable : 0;
 
   return {
-    ordinaryIncome: s.exertionIncome,
-    capitalIncome: s.nonExertionIncome,
-    capitalLines: s.nonExertionLines,
+    ordinaryIncome: bracketBase,
+    fixedIncome: s.fixedIncome,
+    fixedLines: s.fixedLines,
+    fixedTax: s.fixedTax,
     totalTaxable,
     ordinaryBracketTax,
     credit,
     creditUsed,
     ordinaryAfterCredit,
-    capitalTax,
     surtax,
     surtaxThreshold: shared.surtaxThreshold,
     liability,
@@ -167,10 +183,11 @@ function computePerson(cfg, person, shared) {
   };
 }
 
-// A couple: each spouse's personal-exertion income is taxed separately (חישוב
-// נפרד). All non-exertion income is pooled into a joint calculation and taxed at
-// the marginal rate of the spouse with the higher (personal-exertion) income —
-// the attribution rule of s' 66 to the Income Tax Ordinance.
+// Couple: each spouse's personal-exertion income is taxed separately (חישוב
+// נפרד). Non-exertion income is pooled into a joint calculation — capital income
+// keeps its statutory flat rate; other non-exertion income is taxed at the
+// marginal rate of the spouse with the higher (personal-exertion) income
+// (s' 66 attribution).
 function computeCouple(cfg, persons, shared) {
   const parts = persons.map((p) => ({ person: p, ...splitPersonDocs(cfg, p) }));
 
@@ -198,32 +215,41 @@ function computeCouple(cfg, persons, shared) {
   const higherIdx = spouses[0].exertionIncome >= spouses[1].exertionIncome ? 0 : 1;
   const ordHigh = spouses[higherIdx].exertionIncome;
 
-  const jointIncome = parts.reduce((s, pt) => s + pt.nonExertionIncome, 0);
-  const jointWithheld = parts.reduce((s, pt) => s + pt.nonExertionWithheld, 0);
-  const jointLines = parts.flatMap((pt, i) =>
-    pt.nonExertionLines.map((l) => ({ ...l, spouse: i }))
+  // Fixed-rate capital — pooled, but each line keeps its own flat rate.
+  const fixedLines = parts.flatMap((pt, i) =>
+    pt.fixedLines.map((l) => ({ ...l, spouse: i }))
   );
-  const jointRate = marginalRate(cfg, ordHigh);
-  const jointIncomeTax = jointIncome * jointRate;
+  const fixedIncome = parts.reduce((s, pt) => s + pt.fixedIncome, 0);
+  const fixedTax = parts.reduce((s, pt) => s + pt.fixedTax, 0);
+  const fixedWithheld = parts.reduce((s, pt) => s + pt.fixedWithheld, 0);
 
-  // Surtax on the joint income = the extra it creates when stacked on the higher
-  // spouse's income above the (per-taxpayer) threshold.
+  // Non-exertion marginal income — taxed at the higher spouse's marginal rate.
+  const passiveIncome = parts.reduce((s, pt) => s + pt.passiveIncome, 0);
+  const passiveWithheld = parts.reduce((s, pt) => s + pt.passiveWithheld, 0);
+  const passiveRate = marginalRate(cfg, ordHigh);
+  const passiveTax = passiveIncome * passiveRate;
+
+  const jointIncome = fixedIncome + passiveIncome;
   const th = shared.surtaxThreshold;
   const jointSurtax =
     shared.surtaxRate *
     (Math.max(0, ordHigh + jointIncome - th) - Math.max(0, ordHigh - th));
 
-  const jointTax = jointIncomeTax + jointSurtax;
+  const jointTax = fixedTax + passiveTax + jointSurtax;
+  const jointWithheld = fixedWithheld + passiveWithheld;
   const joint = {
     higherIdx,
-    income: jointIncome,
-    rate: jointRate,
-    incomeTax: jointIncomeTax,
+    fixedIncome,
+    fixedTax,
+    fixedLines,
+    passiveIncome,
+    passiveRate,
+    passiveTax,
     surtax: jointSurtax,
+    income: jointIncome,
     tax: jointTax,
     withheld: jointWithheld,
     balance: jointWithheld - jointTax,
-    lines: jointLines,
   };
 
   const liability = spouses[0].liability + spouses[1].liability + jointTax;
@@ -436,8 +462,9 @@ export default function IncomeTaxCalculator() {
         {isCouple && (
           <p className="mt-2 text-xs text-ink-soft">
             הכנסה מיגיעה אישית של כל בן זוג ממוסה בנפרד (מדרגות המס ונקודות הזיכוי
-            שלו). הכנסה שאינה מיגיעה אישית (הון) מיוחסת לחישוב המשותף וממוסה לפי
-            שיעור המס של בן הזוג בעל ההכנסה הגבוהה.
+            שלו). הכנסות הון בשיעור קבוע ממוסות בשיעור הקבוע; הכנסה אחרת שאינה
+            מיגיעה אישית ממוסה בחישוב המשותף לפי שיעור המס של בן הזוג בעל ההכנסה
+            הגבוהה.
           </p>
         )}
       </div>
@@ -450,7 +477,6 @@ export default function IncomeTaxCalculator() {
           person={p}
           title={personName(p, i, mode)}
           showName={isCouple}
-          capitalJoint={isCouple}
           pointValueNum={num(shared.pointValue)}
           onName={(v) => setPerson(p.id, { name: v })}
           onGender={(g) => setGender(p.id, g)}
@@ -594,7 +620,6 @@ function PersonCard({
   person,
   title,
   showName,
-  capitalJoint,
   pointValueNum,
   onName,
   onGender,
@@ -677,7 +702,6 @@ function PersonCard({
               key={d.id}
               doc={d}
               index={idx}
-              capitalJoint={capitalJoint}
               onChange={(patch) => onDocChange(d.id, patch)}
               onRemove={person.docs.length > 1 ? () => onRemoveDoc(d.id) : null}
               defaultRate={
@@ -723,23 +747,20 @@ function PersonBreakdown({ r, surtaxRatePct }) {
   const refund = r.balance >= 0;
   return (
     <dl className="divide-y divide-slate-100 border-t border-slate-100 text-sm">
-      <Row
-        label="הכנסה חייבת מיגיעה אישית (106)"
-        value={ILS.format(r.ordinaryIncome)}
-      />
+      <Row label="הכנסה חייבת (מדרגות מס)" value={ILS.format(r.ordinaryIncome)} />
       <Row
         label="מס לפי מדרגות (לפני זיכויים)"
         value={ILS.format(r.ordinaryBracketTax)}
       />
       <Row label="זיכוי נקודות זיכוי" value={ILSminus(r.creditUsed)} />
       <Row
-        label="מס על יגיעה אישית (אחרי זיכוי)"
+        label="מס על הכנסה במדרגות (אחרי זיכוי)"
         value={ILS.format(r.ordinaryAfterCredit)}
       />
-      {r.capitalIncome > 0 && (
-        <Row label="הכנסה מהון (867)" value={ILS.format(r.capitalIncome)} />
+      {r.fixedIncome > 0 && (
+        <Row label="הכנסה מהון (שיעור קבוע)" value={ILS.format(r.fixedIncome)} />
       )}
-      {r.capitalLines.map((l) => (
+      {r.fixedLines.map((l) => (
         <Row
           key={l.id}
           muted
@@ -749,8 +770,8 @@ function PersonBreakdown({ r, surtaxRatePct }) {
           value={ILS.format(l.income * l.rate)}
         />
       ))}
-      {r.capitalTax > 0 && (
-        <Row label="סה״כ מס על הון" value={ILS.format(r.capitalTax)} />
+      {r.fixedTax > 0 && (
+        <Row label="סה״כ מס על הון (שיעור קבוע)" value={ILS.format(r.fixedTax)} />
       )}
       {r.surtax > 0 && (
         <Row
@@ -759,10 +780,7 @@ function PersonBreakdown({ r, surtaxRatePct }) {
         />
       )}
       <Row label="סה״כ חבות מס" value={ILS.format(r.liability)} strong />
-      <Row
-        label="מס שנוכה במקור (106 + 867)"
-        value={ILSminus(r.withheldTotal)}
-      />
+      <Row label="מס שנוכה במקור" value={ILSminus(r.withheldTotal)} />
       <Row
         label={refund ? "החזר מס צפוי" : "יתרת מס לתשלום"}
         value={ILS.format(Math.abs(r.balance))}
@@ -793,9 +811,8 @@ function TR({ label, cells, strong, muted }) {
         {label}
       </td>
       {cells.map((c, i) => {
-        // A cell's own color class (dash / balance / deduction) fully controls
-        // it; otherwise fall back to the row's strong/normal default so the two
-        // never conflict.
+        // A cell's own color class fully controls it; otherwise fall back to the
+        // row's strong/normal default so the two never conflict.
         const cls =
           c.cls || (strong ? "font-extrabold text-brand-700" : "font-semibold text-ink");
         return (
@@ -870,16 +887,37 @@ function CoupleBreakdown({ spouses, joint, household, names, surtaxRatePct }) {
                 money(s0.ordinaryAfterCredit + s1.ordinaryAfterCredit),
               ]}
             />
-            <TR
-              label="הכנסה שאינה מיגיעה אישית (הון)"
-              cells={[dash, dash, money(joint.income), money(joint.income)]}
-            />
-            <TR
-              label={`מס על הכנסה שאינה מיגיעה אישית (${(joint.rate * 100).toFixed(
-                0
-              )}%)`}
-              cells={[dash, dash, money(joint.incomeTax), money(joint.incomeTax)]}
-            />
+            {joint.fixedIncome > 0 && (
+              <TR
+                label="הכנסה מהון (שיעור קבוע)"
+                cells={[dash, dash, money(joint.fixedIncome), money(joint.fixedIncome)]}
+              />
+            )}
+            {joint.fixedIncome > 0 && (
+              <TR
+                label="מס על הון (שיעור קבוע)"
+                cells={[dash, dash, money(joint.fixedTax), money(joint.fixedTax)]}
+              />
+            )}
+            {joint.passiveIncome > 0 && (
+              <TR
+                label="הכנסה שאינה מיגיעה אישית (שיעור שולי)"
+                cells={[
+                  dash,
+                  dash,
+                  money(joint.passiveIncome),
+                  money(joint.passiveIncome),
+                ]}
+              />
+            )}
+            {joint.passiveIncome > 0 && (
+              <TR
+                label={`מס לפי שיעור בן/בת הזוג (${(joint.passiveRate * 100).toFixed(
+                  0
+                )}%)`}
+                cells={[dash, dash, money(joint.passiveTax), money(joint.passiveTax)]}
+              />
+            )}
             {hasSurtax && (
               <TR
                 label={`מס יסף (${surtaxRatePct}%)`}
@@ -924,10 +962,11 @@ function CoupleBreakdown({ spouses, joint, household, names, surtaxRatePct }) {
         </table>
       </div>
       <p className="px-3 py-3 text-xs text-ink-soft">
-        ההכנסה שאינה מיגיעה אישית משויכת לחישוב המשותף וממוסה לפי שיעור המס השולי של{" "}
-        {higherName} ({(joint.rate * 100).toFixed(0)}%). הערה: הכנסות הון עם שיעור
-        מס מיוחד (דיבידנד/ריבית/רווח הון בשוק ההון) ממוסות בפועל בשיעור הקבוע בחוק —
-        נשמח להתאים את החישוב לפי הצורך.
+        הכנסות הון בשיעור קבוע (דיבידנד/ריבית/רווח הון) ממוסות בשיעור הקבוע בחוק.
+        {joint.passiveIncome > 0 &&
+          ` הכנסה אחרת שאינה מיגיעה אישית ממוסה לפי שיעור המס השולי של ${higherName} (${(
+            joint.passiveRate * 100
+          ).toFixed(0)}%).`}
       </p>
     </div>
   );
@@ -935,21 +974,13 @@ function CoupleBreakdown({ spouses, joint, household, names, surtaxRatePct }) {
 
 // ----- a single document card, rendered per type -----
 
-function DocCard({ doc, index, capitalJoint, onChange, onRemove, defaultRate }) {
+function DocCard({ doc, index, onChange, onRemove, defaultRate }) {
   const title =
     doc.type === "106"
       ? "טופס 106 — משכורת"
       : doc.type === "867"
       ? "טופס 867 — הכנסות מהון"
       : "מסמך אחר";
-
-  // In couple mode capital income is taxed jointly at the higher spouse's rate,
-  // so the per-line rate field is hidden and replaced with a note.
-  const jointCapitalNote = (
-    <p className="rounded-lg bg-brand-50 px-3 py-2 text-xs text-ink-soft">
-      בחישוב זוגי: ממוסה בחישוב המשותף לפי שיעור המס של בן הזוג בעל ההכנסה הגבוהה.
-    </p>
-  );
 
   return (
     <div className="rounded-xl border border-slate-100 bg-slate-50 p-4">
@@ -1006,19 +1037,15 @@ function DocCard({ doc, index, capitalJoint, onChange, onRemove, defaultRate }) 
             onChange={(v) => onChange({ category: v })}
             options={CAPITAL_CATEGORIES}
           />
-          {capitalJoint ? (
-            <div className="flex items-end">{jointCapitalNote}</div>
-          ) : (
-            <NumField
-              label="שיעור מס"
-              value={doc.rate}
-              placeholder={String((defaultRate ?? 0.25) * 100)}
-              suffix="%"
-              asText
-              hint="ברירת מחדל לפי סוג ההכנסה. ריבית על פיקדון שקלי לרוב 15%."
-              onChange={(v) => onChange({ rate: v })}
-            />
-          )}
+          <NumField
+            label="שיעור מס"
+            value={doc.rate}
+            placeholder={String((defaultRate ?? 0.25) * 100)}
+            suffix="%"
+            asText
+            hint="ברירת מחדל לפי סוג ההכנסה. ריבית על פיקדון שקלי לרוב 15%."
+            onChange={(v) => onChange({ rate: v })}
+          />
           <NumField
             label="סכום ההכנסה"
             value={doc.income}
@@ -1057,10 +1084,7 @@ function DocCard({ doc, index, capitalJoint, onChange, onRemove, defaultRate }) 
               label="סיווג ההכנסה"
               value={doc.kind}
               onChange={(v) => onChange({ kind: v })}
-              options={[
-                { k: "ordinary", t: "יגיעה אישית (מדרגות מס)" },
-                { k: "capital", t: "הון (שיעור מס קבוע)" },
-              ]}
+              options={OTHER_KINDS}
             />
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
@@ -1080,19 +1104,22 @@ function DocCard({ doc, index, capitalJoint, onChange, onRemove, defaultRate }) 
               thousands
               onChange={(v) => onChange({ withheld: v })}
             />
-            {doc.kind === "capital" &&
-              (capitalJoint ? (
-                jointCapitalNote
-              ) : (
-                <NumField
-                  label="שיעור מס"
-                  value={doc.rate}
-                  placeholder="25"
-                  suffix="%"
-                  asText
-                  onChange={(v) => onChange({ rate: v })}
-                />
-              ))}
+            {doc.kind === "fixed" && (
+              <NumField
+                label="שיעור מס"
+                value={doc.rate}
+                placeholder="25"
+                suffix="%"
+                asText
+                onChange={(v) => onChange({ rate: v })}
+              />
+            )}
+            {doc.kind === "passive" && (
+              <p className="flex items-end rounded-lg bg-brand-50 px-3 py-2 text-xs text-ink-soft">
+                בחישוב זוגי: ממוסה בחישוב המשותף לפי שיעור המס של בן הזוג בעל
+                ההכנסה הגבוהה.
+              </p>
+            )}
           </div>
         </>
       )}
