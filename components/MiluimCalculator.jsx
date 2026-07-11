@@ -116,11 +116,15 @@ function Toggle({ label, checked, onChange, hint }) {
   );
 }
 
-function Row({ label, value, strong, muted }) {
+// A breakdown line. `note` renders a muted sub-line (e.g. payment timing).
+function Row({ label, value, strong, muted, note }) {
   return (
-    <div className="flex items-center justify-between px-4 py-2.5">
+    <div className="flex items-start justify-between px-4 py-2.5">
       <dt className={strong ? "font-bold text-ink" : muted ? "text-ink-soft" : "text-ink"}>
-        {label}
+        <span>{label}</span>
+        {note && (
+          <span className="mt-0.5 block text-xs font-normal text-ink-soft">{note}</span>
+        )}
       </dt>
       <dd
         dir="rtl"
@@ -129,6 +133,12 @@ function Row({ label, value, strong, muted }) {
         {value}
       </dd>
     </div>
+  );
+}
+
+function GroupHeader({ children }) {
+  return (
+    <div className="bg-slate-50 px-4 py-1.5 text-xs font-bold text-ink-soft">{children}</div>
   );
 }
 
@@ -146,8 +156,8 @@ export default function MiluimCalculator() {
   const [familyGrant, setFamilyGrant] = useState(false);
   const [specialFamily, setSpecialFamily] = useState(false);
 
-  // Reserve-pay (income replacement from Bituach Leumi).
-  const [reserveMode, setReserveMode] = useState("salary"); // "salary" | "min"
+  // Reserve pay (income replacement) — always by salary; below-minimum is
+  // topped up to the minimum automatically.
   const [reserveSalary, setReserveSalary] = useState("");
 
   // Optional per-month drill-down.
@@ -205,40 +215,62 @@ export default function MiluimCalculator() {
     [cfg, rates, grade]
   );
 
-  const input = { grade, days, familyGrant, specialFamily, reserveMode, reserveSalary };
+  const input = { grade, days, familyGrant, specialFamily, reserveSalary };
 
   const result = useMemo(
     () => computeMiluim(effCfg, input),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [effCfg, grade, days, familyGrant, specialFamily, reserveMode, reserveSalary]
+    [effCfg, grade, days, familyGrant, specialFamily, reserveSalary]
   );
 
   // A specific month's share = the marginal compensation of the days served
   // that month, given their position in the yearly cumulative count:
   // compute(days through end of month) − compute(days before the month). This
   // attributes the day-41/day-61 thresholds and one-time grants to the right
-  // month automatically.
+  // month automatically, and gives the day-count that fell into each band.
   const monthly = useMemo(() => {
     if (!monthlyOn) return null;
-    const base = { grade, familyGrant, specialFamily, reserveMode, reserveSalary };
+    const base = { grade, familyGrant, specialFamily, reserveSalary };
     const end = Math.max(0, Math.floor(num(cumEnd) || num(days)));
     const m = Math.max(0, Math.floor(num(monthDays)));
     const start = Math.max(0, end - m);
     const full = computeMiluim(effCfg, { ...base, days: end });
     const before = computeMiluim(effCfg, { ...base, days: start });
     const d = (k) => full[k] - before[k];
+    const reservePay = d("reservePay");
+    const specialComp = d("specialComp");
+    const personalExpenses = d("personalExpenses");
+    const familyGrantV = d("familyGrant");
+    const householdGrant = d("householdGrant");
+    const specialFamilyGrant = d("specialFamilyGrant");
+    const recurringTotal = reservePay + specialComp + personalExpenses + familyGrantV;
+    const oneTimeTotal = householdGrant + specialFamilyGrant;
+    const total = recurringTotal + oneTimeTotal;
+    const mdays = end - start;
     return {
-      days: end - start,
-      reservePay: d("reservePay"),
-      specialComp: d("specialComp"),
-      personalExpenses: d("personalExpenses"),
-      familyGrant: d("familyGrant"),
-      householdGrant: d("householdGrant"),
-      specialFamilyGrant: d("specialFamilyGrant"),
-      total: d("total"),
+      days: mdays,
+      reserveDaily: full.reserveDaily,
+      reservePay,
+      specialDays: d("specialDays"),
+      scRate: full.scRate,
+      specialComp,
+      peDays: d("peDays"),
+      peRate: full.peRate,
+      personalExpenses,
+      fgDays: d("fgDays"),
+      fgRate: full.fgRate,
+      familyGrant: familyGrantV,
+      householdGrant,
+      specialFamilyGrant,
+      recurringTotal,
+      oneTimeTotal,
+      total,
+      avgPerDay: mdays > 0 ? total / mdays : 0,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [monthlyOn, cumEnd, monthDays, days, effCfg, grade, familyGrant, specialFamily, reserveMode, reserveSalary]);
+  }, [monthlyOn, cumEnd, monthDays, days, effCfg, grade, familyGrant, specialFamily, reserveSalary]);
+
+  const hasOneTime = result.oneTimeTotal > 0;
 
   return (
     <div className="space-y-6">
@@ -284,54 +316,20 @@ export default function MiluimCalculator() {
       <div className="card">
         <SectionTitle>תשלום עבור ימי המילואים (תגמול)</SectionTitle>
         <p className="-mt-2 mb-4 text-sm text-ink-soft">
-          תגמול המילואים מהמוסד לביטוח לאומי מחליף את השכר בימי השירות. התגמול
-          היומי מחושב לפי השכר, או לפי התגמול המינימלי. רכיב זה חייב במס (בשונה
-          מהתגמול המיוחד והמענקים שפטורים).
+          תגמול המילואים מהמוסד לביטוח לאומי מחליף את השכר בימי השירות ומחושב לפי
+          השכר. רכיב זה חייב במס (בשונה מהתגמול המיוחד והמענקים שפטורים).
         </p>
 
-        <div className="mb-4">
-          <span className="mb-1 block font-medium text-ink">אופן החישוב</span>
-          <div className="inline-flex rounded-full border border-slate-200 bg-white p-1">
-            {[
-              { k: "salary", t: "לפי שכר" },
-              { k: "min", t: "תגמול מינימלי" },
-            ].map((o) => (
-              <button
-                key={o.k}
-                type="button"
-                onClick={() => setReserveMode(o.k)}
-                className={`rounded-full px-5 py-1.5 text-sm font-semibold transition ${
-                  reserveMode === o.k
-                    ? "bg-brand-700 text-white"
-                    : "text-ink-soft hover:text-brand-700"
-                }`}
-              >
-                {o.t}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {reserveMode === "salary" ? (
-          <NumField
-            label="שכר ברוטו חודשי"
-            value={reserveSalary}
-            suffix="₪"
-            placeholder="0"
-            onChange={setReserveSalary}
-            hint={`התגמול היומי = שכר חודשי ÷ ${num(cfg.reservePay.monthlyDivisor)}, בין ${ILS.format(
-              num(rates.minDaily)
-            )} ל-${ILS.format(num(rates.maxDaily))} ליום. שכר נמוך מושלם לתגמול המינימלי.`}
-          />
-        ) : (
-          <p className="rounded-xl bg-brand-50 px-4 py-3 text-sm text-ink-soft">
-            תגמול מינימלי:{" "}
-            <span className="font-bold text-brand-700">
-              {ILSrate.format(num(rates.minDaily))}
-            </span>{" "}
-            ליום.
-          </p>
-        )}
+        <NumField
+          label="שכר ברוטו חודשי"
+          value={reserveSalary}
+          suffix="₪"
+          placeholder="0"
+          onChange={setReserveSalary}
+          hint={`התגמול היומי = שכר חודשי ÷ ${num(cfg.reservePay.monthlyDivisor)}, בין ${ILS.format(
+            num(rates.minDaily)
+          )} ל-${ILS.format(num(rates.maxDaily))} ליום. שכר נמוך מהמינימום (או ריק) מחושב לפי התגמול המינימלי.`}
+        />
 
         <p className="mt-4 rounded-xl bg-slate-50 px-4 py-3 text-sm text-ink-soft">
           תגמול יומי:{" "}
@@ -349,6 +347,9 @@ export default function MiluimCalculator() {
           <p className="text-sm text-ink-soft">סה״כ צפוי (ברוטו)</p>
           <p className="mt-1 text-4xl font-extrabold text-brand-700">
             {ILS.format(result.total)}
+          </p>
+          <p className="mt-1 text-sm font-semibold text-ink">
+            תגמול ממוצע ליום: {ILSrate.format(result.avgPerDay)}
           </p>
           <p className="mt-2 text-xs text-ink-soft">
             {result.days} ימי מילואים · {result.grade.t}
@@ -371,13 +372,14 @@ export default function MiluimCalculator() {
           </button>
           {showDetail && (
             <dl className="divide-y divide-slate-100 border-t border-slate-100 text-sm">
+              <GroupHeader>תגמולים ומענקים שוטפים</GroupHeader>
               {result.reservePay > 0 && (
                 <Row
                   label={`תגמול המילואים — ${result.days} ימים × ${ILSrate.format(
                     result.reserveDaily
                   )} (חייב במס)`}
                   value={ILS.format(result.reservePay)}
-                  strong
+                  note={cfg.reservePay.paidOn}
                 />
               )}
               {result.specialComp > 0 && (
@@ -386,6 +388,7 @@ export default function MiluimCalculator() {
                     result.scRate
                   )}`}
                   value={ILS.format(result.specialComp)}
+                  note={cfg.specialComp.paidOn}
                 />
               )}
               {result.personalExpenses > 0 && (
@@ -394,20 +397,39 @@ export default function MiluimCalculator() {
                     result.peRate
                   )}`}
                   value={ILS.format(result.personalExpenses)}
+                  note={cfg.personalExpenses.paidOn}
                 />
               )}
               {result.familyGrant > 0 && (
                 <Row
                   label={`מענק משפחה מוגדל — ${result.fgDays} ימים × ${ILS.format(result.fgRate)}`}
                   value={ILS.format(result.familyGrant)}
+                  note={cfg.familyGrant.paidOn}
                 />
               )}
-              {result.householdGrant > 0 && (
-                <Row label="מענק כלכלת הבית מוגדל (חד־פעמי)" value={ILS.format(result.householdGrant)} />
+              <Row label="סה״כ שוטף" value={ILS.format(result.recurringTotal)} strong />
+
+              {hasOneTime && (
+                <>
+                  <GroupHeader>מענקים חד־פעמיים</GroupHeader>
+                  {result.householdGrant > 0 && (
+                    <Row
+                      label="מענק כלכלת הבית מוגדל"
+                      value={ILS.format(result.householdGrant)}
+                      note={cfg.householdGrant.paidOn}
+                    />
+                  )}
+                  {result.specialFamilyGrant > 0 && (
+                    <Row
+                      label="מענק משפחה מיוחדת"
+                      value={ILS.format(result.specialFamilyGrant)}
+                      note={cfg.specialFamilyGrant.paidOn}
+                    />
+                  )}
+                  <Row label="סה״כ חד־פעמי" value={ILS.format(result.oneTimeTotal)} strong />
+                </>
               )}
-              {result.specialFamilyGrant > 0 && (
-                <Row label="מענק משפחה מיוחדת (חד־פעמי)" value={ILS.format(result.specialFamilyGrant)} />
-              )}
+
               <Row label="סה״כ צפוי (ברוטו)" value={ILS.format(result.total)} strong />
             </dl>
           )}
@@ -519,31 +541,70 @@ export default function MiluimCalculator() {
               <p className="mt-1 text-4xl font-extrabold text-brand-700">
                 {ILS.format(monthly?.total || 0)}
               </p>
+              <p className="mt-1 text-sm font-semibold text-ink">
+                תגמול ממוצע ליום: {ILSrate.format(monthly?.avgPerDay || 0)}
+              </p>
               <p className="mt-2 text-xs text-ink-soft">
                 {monthly?.days || 0} ימים בחודש · {result.grade.t}
               </p>
             </div>
 
-            {monthly && monthly.total > 0 && (
+            {monthly && monthly.total !== 0 && (
               <dl className="mt-4 divide-y divide-slate-100 rounded-xl border border-slate-100 text-sm">
+                <GroupHeader>שוטף (החודש)</GroupHeader>
                 {monthly.reservePay > 0 && (
-                  <Row label="תגמול המילואים (חייב במס)" value={ILS.format(monthly.reservePay)} />
+                  <Row
+                    label={`תגמול המילואים — ${monthly.days} ימים × ${ILSrate.format(
+                      monthly.reserveDaily
+                    )} (חייב במס)`}
+                    value={ILS.format(monthly.reservePay)}
+                  />
                 )}
                 {monthly.specialComp > 0 && (
-                  <Row label="תגמול מיוחד" value={ILS.format(monthly.specialComp)} />
+                  <Row
+                    label={`תגמול מיוחד — ${monthly.specialDays} ימים (מעל 60) × ${ILS.format(
+                      monthly.scRate
+                    )}`}
+                    value={ILS.format(monthly.specialComp)}
+                  />
                 )}
                 {monthly.personalExpenses > 0 && (
-                  <Row label="מענק הוצאות אישיות" value={ILS.format(monthly.personalExpenses)} />
+                  <Row
+                    label={`מענק הוצאות אישיות — ${monthly.peDays} ימים (מעל 40) × ${ILS.format(
+                      monthly.peRate
+                    )}`}
+                    value={ILS.format(monthly.personalExpenses)}
+                  />
                 )}
                 {monthly.familyGrant > 0 && (
-                  <Row label="מענק משפחה מוגדל" value={ILS.format(monthly.familyGrant)} />
+                  <Row
+                    label={`מענק משפחה מוגדל — ${monthly.fgDays} ימים × ${ILS.format(monthly.fgRate)}`}
+                    value={ILS.format(monthly.familyGrant)}
+                  />
                 )}
-                {monthly.householdGrant > 0 && (
-                  <Row label="מענק כלכלת הבית מוגדל" value={ILS.format(monthly.householdGrant)} />
+                <Row label="סה״כ שוטף לחודש" value={ILS.format(monthly.recurringTotal)} strong />
+
+                {monthly.oneTimeTotal > 0 && (
+                  <>
+                    <GroupHeader>השפעה על מענקים חד־פעמיים צפויים</GroupHeader>
+                    {monthly.householdGrant > 0 && (
+                      <Row
+                        label="מענק כלכלת הבית מוגדל (מזוכה החודש)"
+                        value={ILS.format(monthly.householdGrant)}
+                        note={cfg.householdGrant.paidOn}
+                      />
+                    )}
+                    {monthly.specialFamilyGrant > 0 && (
+                      <Row
+                        label="מענק משפחה מיוחדת (מזוכה החודש)"
+                        value={ILS.format(monthly.specialFamilyGrant)}
+                        note={cfg.specialFamilyGrant.paidOn}
+                      />
+                    )}
+                    <Row label="סה״כ חד־פעמי" value={ILS.format(monthly.oneTimeTotal)} strong />
+                  </>
                 )}
-                {monthly.specialFamilyGrant > 0 && (
-                  <Row label="מענק משפחה מיוחדת" value={ILS.format(monthly.specialFamilyGrant)} />
-                )}
+
                 <Row label="סה״כ לחודש" value={ILS.format(monthly.total)} strong />
               </dl>
             )}
