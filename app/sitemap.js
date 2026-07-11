@@ -9,6 +9,7 @@ export default function sitemap() {
     "/services",
     "/blog",
     "/calculators",
+    "/calculators/miluim",
     "/faq",
     "/about",
     "/contact",
