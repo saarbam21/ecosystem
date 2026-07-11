@@ -13,8 +13,8 @@ export default function IncomeTaxCalculatorPage() {
     <>
       <PageHeader
         eyebrow="מחשבונים"
-        title="מחשבון מס הכנסה ליחיד"
-        subtitle="חישוב חבות המס השנתית והחזר המס — לפי טופסי 106 ו-867, מין הנישום ונקודות הזיכוי."
+        title="מחשבון מס הכנסה"
+        subtitle="חישוב חבות המס השנתית והחזר המס — ליחיד או לבני זוג, לפי טופסי 106 ו-867, מין הנישום ונקודות הזיכוי."
       />
 
       <section className="section">
