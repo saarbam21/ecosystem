@@ -22,6 +22,23 @@ function num(v) {
   return isNaN(n) ? 0 : n;
 }
 
+const MONTHS = [
+  { k: "", t: "— בחרו חודש —" },
+  { k: "1", t: "ינואר" },
+  { k: "2", t: "פברואר" },
+  { k: "3", t: "מרץ" },
+  { k: "4", t: "אפריל" },
+  { k: "5", t: "מאי" },
+  { k: "6", t: "יוני" },
+  { k: "7", t: "יולי" },
+  { k: "8", t: "אוגוסט" },
+  { k: "9", t: "ספטמבר" },
+  { k: "10", t: "אוקטובר" },
+  { k: "11", t: "נובמבר" },
+  { k: "12", t: "דצמבר" },
+];
+const monthLabel = (k) => MONTHS.find((m) => m.k === k && k !== "")?.t ?? "";
+
 // ----- shared field components (matching IncomeTaxCalculator) -----
 
 function NumField({ label, value, onChange, placeholder, suffix, asText, hint }) {
@@ -130,6 +147,12 @@ export default function MiluimCalculator() {
   const [combatGrant, setCombatGrant] = useState(false);
   const [familyGrant, setFamilyGrant] = useState(false);
 
+  // Optional per-month drill-down.
+  const [monthlyOn, setMonthlyOn] = useState(false);
+  const [monthName, setMonthName] = useState("");
+  const [cumEnd, setCumEnd] = useState("");
+  const [monthDays, setMonthDays] = useState("");
+
   // Editable assumptions (rates), seeded from the published config.
   const [rates, setRates] = useState(() => ({
     lowerThreshold: String(cfg.specialComp.lowerThreshold),
@@ -152,9 +175,9 @@ export default function MiluimCalculator() {
     if (g) setRates((r) => ({ ...r, gradeRate: String(g.rate) }));
   };
 
-  // Build an effective config from the editable assumptions, then compute.
-  const result = useMemo(() => {
-    const effCfg = {
+  // Build an effective config from the editable assumptions.
+  const effCfg = useMemo(
+    () => ({
       ...cfg,
       specialComp: {
         ...cfg.specialComp,
@@ -171,9 +194,40 @@ export default function MiluimCalculator() {
         combatant: num(rates.pegCombatant),
       },
       familyGrant: { ...cfg.familyGrant, amount: num(rates.familyAmount) },
+    }),
+    [cfg, rates, grade]
+  );
+
+  const result = useMemo(
+    () => computeMiluim(effCfg, { grade, days, combatant, combatGrant, familyGrant }),
+    [effCfg, grade, days, combatant, combatGrant, familyGrant]
+  );
+
+  // A specific month's share = the marginal compensation of the days served
+  // that month, given their position in the yearly cumulative count:
+  // compute(days through end of month) − compute(days before the month).
+  // This attributes the 60-day threshold, the graded rate, the combat-grant
+  // tiers and the per-10-day grants to the correct month automatically.
+  const monthly = useMemo(() => {
+    if (!monthlyOn) return null;
+    const base = { grade, combatant, combatGrant, familyGrant };
+    const end = Math.max(0, Math.floor(num(cumEnd) || num(days)));
+    const m = Math.max(0, Math.floor(num(monthDays)));
+    const start = Math.max(0, end - m);
+    const full = computeMiluim(effCfg, { ...base, days: end });
+    const before = computeMiluim(effCfg, { ...base, days: start });
+    const d = (k) => full[k] - before[k];
+    return {
+      days: end - start,
+      basicPay: d("basicPay"),
+      gradePay: d("gradePay"),
+      specialComp: d("specialComp"),
+      combatGrant: d("combatGrant"),
+      personalExpenses: d("personalExpenses"),
+      familyGrant: d("familyGrant"),
+      total: d("total"),
     };
-    return computeMiluim(effCfg, { grade, days, combatant, combatGrant, familyGrant });
-  }, [cfg, rates, grade, days, combatant, combatGrant, familyGrant]);
+  }, [monthlyOn, cumEnd, monthDays, days, effCfg, grade, combatant, combatGrant, familyGrant]);
 
   return (
     <div className="space-y-6">
@@ -362,6 +416,79 @@ export default function MiluimCalculator() {
             </div>
           )}
         </div>
+      </div>
+
+      {/* Specific-month drill-down */}
+      <div className="card">
+        <div className="mb-2">
+          <Toggle
+            label="חישוב לחודש ספציפי"
+            checked={monthlyOn}
+            onChange={setMonthlyOn}
+            hint="כמה מהתגמול מיוחס לחודש מסוים."
+          />
+        </div>
+
+        {monthlyOn && (
+          <>
+            <p className="mb-4 mt-3 text-sm text-ink-soft">
+              הזינו את סך ימי המילואים שנצברו מתחילת השנה עד תום החודש, ומתוכם כמה
+              בוצעו בחודש עצמו. התגמול לחודש מחושב לפי מיקום הימים בצבירה השנתית —
+              כך שסף ה-60, התעריף לפי דרג והמענקים מיוחסים לחודש הנכון.
+            </p>
+
+            <div className="grid gap-6 sm:grid-cols-3">
+              <Select label="חודש" value={monthName} onChange={setMonthName} options={MONTHS} />
+              <NumField
+                label="ימים שנצברו עד תום החודש"
+                value={cumEnd}
+                asText
+                suffix="ימים"
+                placeholder={String(num(days))}
+                onChange={setCumEnd}
+                hint="ברירת מחדל: סך הימים בשנה שלמעלה."
+              />
+              <NumField
+                label="מתוכם, ימים בחודש זה"
+                value={monthDays}
+                asText
+                suffix="ימים"
+                placeholder="0"
+                onChange={setMonthDays}
+              />
+            </div>
+
+            <div className="mt-5 rounded-2xl border-2 border-brand-200 bg-white p-5 text-center">
+              <p className="text-sm text-ink-soft">
+                תגמול עבור {monthLabel(monthName) || "החודש"} (פטור ממס)
+              </p>
+              <p className="mt-1 text-4xl font-extrabold text-brand-700">
+                {ILS.format(monthly?.total || 0)}
+              </p>
+              <p className="mt-2 text-xs text-ink-soft">
+                {monthly?.days || 0} ימים בחודש · {result.grade.t}
+              </p>
+            </div>
+
+            {monthly && monthly.total > 0 && (
+              <dl className="mt-4 divide-y divide-slate-100 rounded-xl border border-slate-100 text-sm">
+                {monthly.specialComp > 0 && (
+                  <Row label="תגמול מיוחד" value={ILS.format(monthly.specialComp)} />
+                )}
+                {monthly.combatGrant > 0 && (
+                  <Row label="מענק לחימה" value={ILS.format(monthly.combatGrant)} />
+                )}
+                {monthly.personalExpenses > 0 && (
+                  <Row label="מענק הוצאות אישיות" value={ILS.format(monthly.personalExpenses)} />
+                )}
+                {monthly.familyGrant > 0 && (
+                  <Row label="מענק משפחה" value={ILS.format(monthly.familyGrant)} />
+                )}
+                <Row label="סה״כ לחודש" value={ILS.format(monthly.total)} strong />
+              </dl>
+            )}
+          </>
+        )}
       </div>
     </div>
   );
