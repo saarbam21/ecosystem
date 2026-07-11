@@ -22,6 +22,15 @@ function num(v) {
   return isNaN(n) ? 0 : n;
 }
 
+// Format a numeric string with thousands separators while typing.
+function formatThousands(str) {
+  const cleaned = String(str ?? "").replace(/[^\d.]/g, "");
+  if (cleaned === "") return "";
+  const [intPart, ...rest] = cleaned.split(".");
+  const dec = rest.length ? "." + rest.join("") : "";
+  return intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ",") + dec;
+}
+
 const MONTHS = [
   { k: "", t: "— בחרו חודש —" },
   { k: "1", t: "ינואר" },
@@ -41,7 +50,9 @@ const monthLabel = (k) => MONTHS.find((m) => m.k === k && k !== "")?.t ?? "";
 
 // ----- shared field components (matching IncomeTaxCalculator) -----
 
-function NumField({ label, value, onChange, placeholder, suffix, asText, hint }) {
+function NumField({ label, value, onChange, placeholder, suffix, asText, thousands, hint }) {
+  const handle = (e) =>
+    onChange(thousands ? formatThousands(e.target.value) : e.target.value);
   return (
     <div>
       {label && (
@@ -49,12 +60,12 @@ function NumField({ label, value, onChange, placeholder, suffix, asText, hint })
       )}
       <div className="relative">
         <input
-          type={asText ? "text" : "number"}
-          inputMode={asText ? "numeric" : "decimal"}
+          type={asText || thousands ? "text" : "number"}
+          inputMode="numeric"
           dir="ltr"
           value={value}
           placeholder={placeholder}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={handle}
           className="w-full rounded-lg border border-slate-200 px-3 py-2 text-right text-ink outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
         />
         {suffix && (
@@ -243,8 +254,8 @@ export default function MiluimCalculator() {
     const familyGrantV = d("familyGrant");
     const householdGrant = d("householdGrant");
     const specialFamilyGrant = d("specialFamilyGrant");
-    const recurringTotal = reservePay + specialComp + personalExpenses + familyGrantV;
-    const oneTimeTotal = householdGrant + specialFamilyGrant;
+    const recurringTotal = reservePay + personalExpenses + familyGrantV;
+    const oneTimeTotal = specialComp + householdGrant + specialFamilyGrant;
     const total = recurringTotal + oneTimeTotal;
     const mdays = end - start;
     return {
@@ -324,6 +335,7 @@ export default function MiluimCalculator() {
           label="שכר ברוטו חודשי"
           value={reserveSalary}
           suffix="₪"
+          thousands
           placeholder="0"
           onChange={setReserveSalary}
           hint={`התגמול היומי = שכר חודשי ÷ ${num(cfg.reservePay.monthlyDivisor)}, בין ${ILS.format(
@@ -348,10 +360,10 @@ export default function MiluimCalculator() {
           <p className="mt-1 text-4xl font-extrabold text-brand-700">
             {ILS.format(result.total)}
           </p>
-          <p className="mt-1 text-sm font-semibold text-ink">
+          <p className="mt-3 inline-block rounded-full bg-brand-50 px-4 py-1.5 text-sm font-bold text-brand-700">
             תגמול ממוצע ליום: {ILSrate.format(result.avgPerDay)}
           </p>
-          <p className="mt-2 text-xs text-ink-soft">
+          <p className="mt-3 text-xs text-ink-soft">
             {result.days} ימי מילואים · {result.grade.t}
           </p>
           <p className="mt-2 text-xs text-ink-soft">
@@ -382,15 +394,6 @@ export default function MiluimCalculator() {
                   note={cfg.reservePay.paidOn}
                 />
               )}
-              {result.specialComp > 0 && (
-                <Row
-                  label={`תגמול מיוחד — ${result.specialDays} ימים (מהיום ה-61) × ${ILS.format(
-                    result.scRate
-                  )}`}
-                  value={ILS.format(result.specialComp)}
-                  note={cfg.specialComp.paidOn}
-                />
-              )}
               {result.personalExpenses > 0 && (
                 <Row
                   label={`מענק הוצאות אישיות — ${result.peDays} ימים (מהיום ה-41) × ${ILS.format(
@@ -411,7 +414,16 @@ export default function MiluimCalculator() {
 
               {hasOneTime && (
                 <>
-                  <GroupHeader>מענקים חד־פעמיים</GroupHeader>
+                  <GroupHeader>מענקים חד־פעמיים (משולמים פעם בשנה)</GroupHeader>
+                  {result.specialComp > 0 && (
+                    <Row
+                      label={`תגמול מיוחד — ${result.specialDays} ימים (מהיום ה-61) × ${ILS.format(
+                        result.scRate
+                      )}`}
+                      value={ILS.format(result.specialComp)}
+                      note={cfg.specialComp.paidOn}
+                    />
+                  )}
                   {result.householdGrant > 0 && (
                     <Row
                       label="מענק כלכלת הבית מוגדל"
@@ -541,10 +553,10 @@ export default function MiluimCalculator() {
               <p className="mt-1 text-4xl font-extrabold text-brand-700">
                 {ILS.format(monthly?.total || 0)}
               </p>
-              <p className="mt-1 text-sm font-semibold text-ink">
+              <p className="mt-3 inline-block rounded-full bg-brand-50 px-4 py-1.5 text-sm font-bold text-brand-700">
                 תגמול ממוצע ליום: {ILSrate.format(monthly?.avgPerDay || 0)}
               </p>
-              <p className="mt-2 text-xs text-ink-soft">
+              <p className="mt-3 text-xs text-ink-soft">
                 {monthly?.days || 0} ימים בחודש · {result.grade.t}
               </p>
             </div>
@@ -558,14 +570,6 @@ export default function MiluimCalculator() {
                       monthly.reserveDaily
                     )} (חייב במס)`}
                     value={ILS.format(monthly.reservePay)}
-                  />
-                )}
-                {monthly.specialComp > 0 && (
-                  <Row
-                    label={`תגמול מיוחד — ${monthly.specialDays} ימים (מעל 60) × ${ILS.format(
-                      monthly.scRate
-                    )}`}
-                    value={ILS.format(monthly.specialComp)}
                   />
                 )}
                 {monthly.personalExpenses > 0 && (
@@ -587,6 +591,15 @@ export default function MiluimCalculator() {
                 {monthly.oneTimeTotal > 0 && (
                   <>
                     <GroupHeader>השפעה על מענקים חד־פעמיים צפויים</GroupHeader>
+                    {monthly.specialComp > 0 && (
+                      <Row
+                        label={`תגמול מיוחד — ${monthly.specialDays} ימים (מעל 60) × ${ILS.format(
+                          monthly.scRate
+                        )}`}
+                        value={ILS.format(monthly.specialComp)}
+                        note={cfg.specialComp.paidOn}
+                      />
+                    )}
                     {monthly.householdGrant > 0 && (
                       <Row
                         label="מענק כלכלת הבית מוגדל (מזוכה החודש)"
