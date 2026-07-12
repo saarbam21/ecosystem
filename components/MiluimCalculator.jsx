@@ -147,9 +147,41 @@ function Row({ label, value, strong, muted, note }) {
   );
 }
 
-function GroupHeader({ children }) {
+// A collapsible breakdown category. The header shows the subtotal so it stays
+// informative when collapsed. Replaces the old static GroupHeader.
+function Group({ title, subtotal, open, onToggle, muted, children }) {
   return (
-    <div className="bg-slate-50 px-4 py-1.5 text-xs font-bold text-ink-soft">{children}</div>
+    <div className="border-t border-slate-100 first:border-t-0">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex w-full items-center justify-between gap-3 bg-slate-50 px-4 py-2 text-right"
+      >
+        <span className="text-xs font-bold text-ink-soft">{title}</span>
+        <span className="flex items-center gap-2 whitespace-nowrap">
+          <span
+            dir="rtl"
+            className={`text-sm font-extrabold ${muted ? "text-ink-soft" : "text-brand-700"}`}
+          >
+            {subtotal}
+          </span>
+          <span className="w-3 text-center text-ink-soft">{open ? "−" : "+"}</span>
+        </span>
+      </button>
+      {open && <dl className="divide-y divide-slate-100 border-t border-slate-100">{children}</dl>}
+    </div>
+  );
+}
+
+// The grand-total line (not inside a group).
+function TotalRow({ label, value }) {
+  return (
+    <div className="flex items-center justify-between border-t-2 border-slate-200 px-4 py-3">
+      <span className="font-bold text-ink">{label}</span>
+      <span dir="rtl" className="font-extrabold text-brand-700">
+        {value}
+      </span>
+    </div>
   );
 }
 
@@ -190,6 +222,17 @@ export default function MiluimCalculator() {
 
   const [showAssumptions, setShowAssumptions] = useState(false);
   const [showDetail, setShowDetail] = useState(true);
+
+  // Per-category open/close within the breakdown (keeps a crowded list tidy).
+  const [openGroups, setOpenGroups] = useState({
+    recurring: true,
+    oneTime: true,
+    benefits: false,
+    mRecurring: true,
+    mOneTime: true,
+    mBenefits: false,
+  });
+  const toggleGroup = (k) => setOpenGroups((g) => ({ ...g, [k]: !g[k] }));
 
   // Changing the grade re-seeds the editable rates to that grade's defaults.
   const setGrade2 = (k) => {
@@ -390,38 +433,47 @@ export default function MiluimCalculator() {
             <span className="text-ink-soft">{showDetail ? "−" : "+"}</span>
           </button>
           {showDetail && (
-            <dl className="divide-y divide-slate-100 border-t border-slate-100 text-sm">
-              <GroupHeader>תגמולים ומענקים שוטפים</GroupHeader>
-              {result.reservePay > 0 && (
-                <Row
-                  label={`תגמול המילואים — ${result.days} ימים × ${ILSrate.format(
-                    result.reserveDaily
-                  )} (חייב במס)`}
-                  value={ILS.format(result.reservePay)}
-                  note={cfg.reservePay.paidOn}
-                />
-              )}
-              {result.personalExpenses > 0 && (
-                <Row
-                  label={`מענק הוצאות אישיות — ${result.peDays} ימים (מהיום ה-41) × ${ILS.format(
-                    result.peRate
-                  )}`}
-                  value={ILS.format(result.personalExpenses)}
-                  note={cfg.personalExpenses.paidOn}
-                />
-              )}
-              {result.familyGrant > 0 && (
-                <Row
-                  label={`מענק משפחה מוגדל — ${result.fgDays} ימים × ${ILS.format(result.fgRate)}`}
-                  value={ILS.format(result.familyGrant)}
-                  note={cfg.familyGrant.paidOn}
-                />
-              )}
-              <Row label="סה״כ שוטף" value={ILS.format(result.recurringTotal)} strong />
+            <div className="border-t border-slate-100 text-sm">
+              <Group
+                title="תגמולים ומענקים שוטפים"
+                subtotal={ILS.format(result.recurringTotal)}
+                open={openGroups.recurring}
+                onToggle={() => toggleGroup("recurring")}
+              >
+                {result.reservePay > 0 && (
+                  <Row
+                    label={`תגמול המילואים — ${result.days} ימים × ${ILSrate.format(
+                      result.reserveDaily
+                    )} (חייב במס)`}
+                    value={ILS.format(result.reservePay)}
+                    note={cfg.reservePay.paidOn}
+                  />
+                )}
+                {result.personalExpenses > 0 && (
+                  <Row
+                    label={`מענק הוצאות אישיות — ${result.peDays} ימים (מהיום ה-41) × ${ILS.format(
+                      result.peRate
+                    )}`}
+                    value={ILS.format(result.personalExpenses)}
+                    note={cfg.personalExpenses.paidOn}
+                  />
+                )}
+                {result.familyGrant > 0 && (
+                  <Row
+                    label={`מענק משפחה מוגדל — ${result.fgDays} ימים × ${ILS.format(result.fgRate)}`}
+                    value={ILS.format(result.familyGrant)}
+                    note={cfg.familyGrant.paidOn}
+                  />
+                )}
+              </Group>
 
               {hasOneTime && (
-                <>
-                  <GroupHeader>מענקים חד־פעמיים (משולמים פעם בשנה)</GroupHeader>
+                <Group
+                  title="מענקים חד־פעמיים (משולמים פעם בשנה)"
+                  subtotal={ILS.format(result.oneTimeTotal)}
+                  open={openGroups.oneTime}
+                  onToggle={() => toggleGroup("oneTime")}
+                >
                   {result.specialComp > 0 && (
                     <Row
                       label={`תגמול מיוחד — ${result.specialDays} ימים (מהיום ה-61) × ${ILS.format(
@@ -433,7 +485,9 @@ export default function MiluimCalculator() {
                   )}
                   {result.additionalComp > 0 && (
                     <Row
-                      label={`תגמול נוסף — ${result.acPoints} נק׳ זיכוי`}
+                      label={`תגמול נוסף — ${result.acPoints} נק׳ זיכוי × ${ILS.format(
+                        cfg.additionalComp.pointValue
+                      )}`}
                       value={ILS.format(result.additionalComp)}
                       note={cfg.additionalComp.paidOn}
                     />
@@ -452,33 +506,74 @@ export default function MiluimCalculator() {
                       note={cfg.specialFamilyGrant.paidOn}
                     />
                   )}
-                  <Row label="סה״כ חד־פעמי" value={ILS.format(result.oneTimeTotal)} strong />
-                </>
+                </Group>
               )}
 
-              <Row label="סה״כ צפוי (ברוטו)" value={ILS.format(result.total)} strong />
+              <TotalRow label="סה״כ צפוי (ברוטו)" value={ILS.format(result.total)} />
 
               {result.benefitsTotal > 0 && (
-                <>
-                  <GroupHeader>הטבות נוספות (לא כספיות · אינן נכללות בסך התגמול)</GroupHeader>
+                <Group
+                  title="הטבות נוספות (לא כספיות · אינן נכללות בסך התגמול)"
+                  subtotal={ILS.format(result.benefitsTotal)}
+                  open={openGroups.benefits}
+                  onToggle={() => toggleGroup("benefits")}
+                  muted
+                >
                   {result.vacationVoucher > 0 && (
-                    <Row
-                      label="שובר נופש"
-                      value={ILS.format(result.vacationVoucher)}
-                      note={cfg.benefits.vacationVoucher.paidOn}
-                    />
+                    <>
+                      <Row
+                        label="שובר נופש"
+                        value={ILS.format(result.vacationVoucher)}
+                        note={cfg.benefits.vacationVoucher.paidOn}
+                      />
+                      {result.vacationDetail && (
+                        <Row
+                          muted
+                          label={`  בסיס ${ILS.format(result.vacationDetail.base)}${
+                            result.vacationDetail.suppDays > 0
+                              ? ` + ${ILS.format(result.vacationDetail.perDay)} × ${
+                                  result.vacationDetail.suppDays
+                                } ימים (${result.vacationDetail.from}–${result.vacationDetail.to})`
+                              : ""
+                          }${
+                            result.vacationDetail.capped
+                              ? ` · מוגבל לתקרה ${ILS.format(result.vacationDetail.max)}`
+                              : ""
+                          }`}
+                          value=""
+                        />
+                      )}
+                    </>
                   )}
                   {result.fighterWallet > 0 && (
-                    <Row
-                      label="ארנק דיגיטלי (Fighter)"
-                      value={ILS.format(result.fighterWallet)}
-                      note={cfg.benefits.fighterWallet.paidOn}
-                    />
+                    <>
+                      <Row
+                        label="ארנק דיגיטלי (Fighter)"
+                        value={ILS.format(result.fighterWallet)}
+                        note={cfg.benefits.fighterWallet.paidOn}
+                      />
+                      {result.fighterDetail?.bands.map((b, i) => (
+                        <Row
+                          key={i}
+                          muted
+                          label={`  ימים ${b.from}–${b.to === Infinity ? "…" : b.to} × ${ILS.format(
+                            b.rate
+                          )}`}
+                          value={ILS.format(b.pay)}
+                        />
+                      ))}
+                      {result.fighterDetail?.capped && (
+                        <Row
+                          muted
+                          label={`  מוגבל לתקרה ${ILS.format(result.fighterDetail.max)}`}
+                          value=""
+                        />
+                      )}
+                    </>
                   )}
-                  <Row label="סה״כ הטבות נוספות" value={ILS.format(result.benefitsTotal)} strong muted />
-                </>
+                </Group>
               )}
-            </dl>
+            </div>
           )}
         </div>
 
@@ -597,35 +692,44 @@ export default function MiluimCalculator() {
             </div>
 
             {monthly && (monthly.total !== 0 || monthly.benefitsTotal !== 0) && (
-              <dl className="mt-4 divide-y divide-slate-100 rounded-xl border border-slate-100 text-sm">
-                <GroupHeader>שוטף (החודש)</GroupHeader>
-                {monthly.reservePay > 0 && (
-                  <Row
-                    label={`תגמול המילואים — ${monthly.days} ימים × ${ILSrate.format(
-                      monthly.reserveDaily
-                    )} (חייב במס)`}
-                    value={ILS.format(monthly.reservePay)}
-                  />
-                )}
-                {monthly.personalExpenses > 0 && (
-                  <Row
-                    label={`מענק הוצאות אישיות — ${monthly.peDays} ימים (מעל 40) × ${ILS.format(
-                      monthly.peRate
-                    )}`}
-                    value={ILS.format(monthly.personalExpenses)}
-                  />
-                )}
-                {monthly.familyGrant > 0 && (
-                  <Row
-                    label={`מענק משפחה מוגדל — ${monthly.fgDays} ימים × ${ILS.format(monthly.fgRate)}`}
-                    value={ILS.format(monthly.familyGrant)}
-                  />
-                )}
-                <Row label="סה״כ שוטף לחודש" value={ILS.format(monthly.recurringTotal)} strong />
+              <div className="mt-4 overflow-hidden rounded-xl border border-slate-100 text-sm">
+                <Group
+                  title="שוטף (החודש)"
+                  subtotal={ILS.format(monthly.recurringTotal)}
+                  open={openGroups.mRecurring}
+                  onToggle={() => toggleGroup("mRecurring")}
+                >
+                  {monthly.reservePay > 0 && (
+                    <Row
+                      label={`תגמול המילואים — ${monthly.days} ימים × ${ILSrate.format(
+                        monthly.reserveDaily
+                      )} (חייב במס)`}
+                      value={ILS.format(monthly.reservePay)}
+                    />
+                  )}
+                  {monthly.personalExpenses > 0 && (
+                    <Row
+                      label={`מענק הוצאות אישיות — ${monthly.peDays} ימים (מעל 40) × ${ILS.format(
+                        monthly.peRate
+                      )}`}
+                      value={ILS.format(monthly.personalExpenses)}
+                    />
+                  )}
+                  {monthly.familyGrant > 0 && (
+                    <Row
+                      label={`מענק משפחה מוגדל — ${monthly.fgDays} ימים × ${ILS.format(monthly.fgRate)}`}
+                      value={ILS.format(monthly.familyGrant)}
+                    />
+                  )}
+                </Group>
 
                 {monthly.oneTimeTotal > 0 && (
-                  <>
-                    <GroupHeader>השפעה על מענקים חד־פעמיים צפויים</GroupHeader>
+                  <Group
+                    title="השפעה על מענקים חד־פעמיים צפויים"
+                    subtotal={ILS.format(monthly.oneTimeTotal)}
+                    open={openGroups.mOneTime}
+                    onToggle={() => toggleGroup("mOneTime")}
+                  >
                     {monthly.specialComp > 0 && (
                       <Row
                         label={`תגמול מיוחד — ${monthly.specialDays} ימים (מעל 60) × ${ILS.format(
@@ -656,25 +760,28 @@ export default function MiluimCalculator() {
                         note={cfg.specialFamilyGrant.paidOn}
                       />
                     )}
-                    <Row label="סה״כ חד־פעמי" value={ILS.format(monthly.oneTimeTotal)} strong />
-                  </>
+                  </Group>
                 )}
 
-                <Row label="סה״כ לחודש" value={ILS.format(monthly.total)} strong />
+                <TotalRow label="סה״כ לחודש" value={ILS.format(monthly.total)} />
 
                 {monthly.benefitsTotal > 0 && (
-                  <>
-                    <GroupHeader>הטבות נוספות (לא כספיות · אינן נכללות בסך)</GroupHeader>
+                  <Group
+                    title="הטבות נוספות (לא כספיות · אינן נכללות בסך)"
+                    subtotal={ILS.format(monthly.benefitsTotal)}
+                    open={openGroups.mBenefits}
+                    onToggle={() => toggleGroup("mBenefits")}
+                    muted
+                  >
                     {monthly.vacationVoucher > 0 && (
                       <Row label="שובר נופש (מזוכה החודש)" value={ILS.format(monthly.vacationVoucher)} />
                     )}
                     {monthly.fighterWallet > 0 && (
                       <Row label="ארנק דיגיטלי (Fighter)" value={ILS.format(monthly.fighterWallet)} />
                     )}
-                    <Row label="סה״כ הטבות נוספות" value={ILS.format(monthly.benefitsTotal)} strong muted />
-                  </>
+                  </Group>
                 )}
-              </dl>
+              </div>
             )}
           </>
         )}
