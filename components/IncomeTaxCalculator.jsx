@@ -23,21 +23,24 @@ function num(v) {
   return isNaN(n) ? 0 : n;
 }
 
-// Format a numeric string with thousands separators while typing.
-function formatThousands(str) {
-  const cleaned = String(str ?? "").replace(/[^\d.]/g, "");
-  if (cleaned === "") return "";
+// Format a numeric string with thousands separators while typing. When `signed`
+// a leading minus is preserved (used for capital losses).
+function formatThousands(str, signed) {
+  const s = String(str ?? "");
+  const neg = signed && /^\s*-/.test(s);
+  const cleaned = s.replace(/[^\d.]/g, "");
+  if (cleaned === "") return neg ? "-" : "";
   const [intPart, ...rest] = cleaned.split(".");
   const dec = rest.length ? "." + rest.join("") : "";
-  return intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ",") + dec;
+  return (neg ? "-" : "") + intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ",") + dec;
 }
 
-// The fixed-rate capital categories reported on a 867.
+// 867 capital-income categories.
 const CAPITAL_CATEGORIES = [
   { k: "dividend", t: "דיבידנד" },
   { k: "interest", t: "ריבית" },
-  { k: "capitalgain", t: "רווח הון (ני״ע)" },
-  { k: "other", t: "אחר" },
+  { k: "capitalgain", t: "רווח/הפסד הון (ני״ע)" },
+  { k: "other", t: "אחר (שיעור קבוע)" },
 ];
 const categoryLabel = (k) =>
   CAPITAL_CATEGORIES.find((c) => c.k === k)?.t ?? "הון";
@@ -51,14 +54,21 @@ const OTHER_KINDS = [
 
 // ----- documents & taxpayers -----
 
+let lineId = 0;
+const newLine867 = () => ({
+  id: ++lineId,
+  category: "dividend",
+  income: "",
+  withheld: "",
+  rate: "",
+});
+
 let docId = 0;
 const newDoc = (type = "106") => {
   const base = { id: ++docId, type };
   if (type === "106") return { ...base, employer: "", income: "", withheld: "" };
-  if (type === "867")
-    return { ...base, category: "dividend", income: "", withheld: "", rate: "" };
-  // "other": free-form income line — personal exertion, fixed-rate capital, or
-  // non-exertion income taxed at the marginal rate.
+  if (type === "867") return { ...base, description: "", lines: [newLine867()] };
+  // "other": free-form income line.
   return { ...base, label: "", kind: "ordinary", income: "", withheld: "", rate: "" };
 };
 
@@ -72,6 +82,7 @@ const newPerson = (gender = "male") => ({
       ? DEFAULT_INCOME_TAX_CONFIG.pointsMale
       : DEFAULT_INCOME_TAX_CONFIG.pointsFemale
   ),
+  lossCarryforward: "",
   docs: [newDoc("106")],
 });
 
@@ -88,191 +99,296 @@ function capitalRateFor(cfg, category, rate) {
   return cfg.capitalRates[category] ?? cfg.capitalRates.other;
 }
 
-// Split a person's documents into three buckets:
-//  - exertion: personal-exertion income (יגיעה אישית) — taxed on the brackets.
-//  - fixed: capital income with a statutory flat rate (dividend/interest/gains).
-//  - passive: non-exertion income WITHOUT a special rate (e.g. marginal-track
-//    rental) — taxed at a marginal rate (the higher spouse's, in couple mode).
+// Split a person's documents into exertion, passive (non-exertion marginal) and
+// four capital sub-categories, each carrying its source lines.
 function splitPersonDocs(cfg, person) {
   let exertionIncome = 0;
   let exertionWithheld = 0;
+  const exertionSources = [];
   let passiveIncome = 0;
   let passiveWithheld = 0;
-  const fixedLines = [];
+  const passiveSources = [];
+  const cap = {
+    dividend: { sources: [] },
+    interest: { sources: [] },
+    capitalgain: { sources: [] },
+    otherfixed: { sources: [] },
+  };
+  const pushCap = (key, label, income, rate, withheld) =>
+    cap[key].sources.push({ label, income, rate, withheld });
 
   for (const d of person.docs) {
-    const income = num(d.income);
-    const withheld = num(d.withheld);
     if (d.type === "106") {
+      const income = num(d.income);
+      const withheld = num(d.withheld);
       exertionIncome += income;
       exertionWithheld += withheld;
+      exertionSources.push({ label: d.employer?.trim() || "טופס 106", income, withheld });
     } else if (d.type === "867") {
-      fixedLines.push({
-        id: d.id,
-        category: d.category,
-        income,
-        rate: capitalRateFor(cfg, d.category, d.rate),
-        withheld,
-      });
-    } else if (d.kind === "fixed") {
-      fixedLines.push({
-        id: d.id,
-        category: "other",
-        income,
-        rate: capitalRateFor(cfg, "other", d.rate),
-        withheld,
-      });
-    } else if (d.kind === "passive") {
-      passiveIncome += income;
-      passiveWithheld += withheld;
+      const label = d.description?.trim() || "טופס 867";
+      for (const ln of d.lines || []) {
+        const income = num(ln.income);
+        const withheld = num(ln.withheld);
+        if (ln.category === "capitalgain") {
+          pushCap("capitalgain", label, income, cfg.capitalRates.capitalgain, withheld);
+        } else if (ln.category === "dividend" || ln.category === "interest") {
+          pushCap(ln.category, label, income, capitalRateFor(cfg, ln.category, ln.rate), withheld);
+        } else {
+          pushCap("otherfixed", label, income, capitalRateFor(cfg, "other", ln.rate), withheld);
+        }
+      }
     } else {
-      exertionIncome += income;
-      exertionWithheld += withheld;
+      const income = num(d.income);
+      const withheld = num(d.withheld);
+      const label = d.label?.trim() || "מסמך אחר";
+      if (d.kind === "fixed") {
+        pushCap("otherfixed", label, income, capitalRateFor(cfg, "other", d.rate), withheld);
+      } else if (d.kind === "passive") {
+        passiveIncome += income;
+        passiveWithheld += withheld;
+        passiveSources.push({ label, income, withheld });
+      } else {
+        exertionIncome += income;
+        exertionWithheld += withheld;
+        exertionSources.push({ label, income, withheld });
+      }
     }
   }
-  const fixedIncome = fixedLines.reduce((s, l) => s + l.income, 0);
-  const fixedTax = fixedLines.reduce((s, l) => s + l.income * l.rate, 0);
-  const fixedWithheld = fixedLines.reduce((s, l) => s + l.withheld, 0);
   return {
     exertionIncome,
     exertionWithheld,
+    exertionSources,
     passiveIncome,
     passiveWithheld,
-    fixedLines,
-    fixedIncome,
-    fixedTax,
-    fixedWithheld,
+    passiveSources,
+    cap,
   };
 }
 
-// Individual mode: everything on the person's own brackets / flat rates.
-// Non-exertion marginal income is added to the bracket base (a single filer has
-// no spouse to attribute it to).
-function computePerson(cfg, person, shared) {
-  const s = splitPersonDocs(cfg, person);
-  const bracketBase = s.exertionIncome + s.passiveIncome;
-  const ordinaryBracketTax = annualIncomeTax(cfg, bracketBase);
-  const credit = num(person.points) * shared.pointValue;
-  const creditUsed = Math.min(credit, ordinaryBracketTax);
-  const ordinaryAfterCredit = Math.max(0, ordinaryBracketTax - credit);
-
-  const totalTaxable = bracketBase + s.fixedIncome;
-  const surtax = shared.surtaxRate * Math.max(0, totalTaxable - shared.surtaxThreshold);
-
-  const liability = ordinaryAfterCredit + s.fixedTax + surtax;
-  const withheldTotal = s.exertionWithheld + s.passiveWithheld + s.fixedWithheld;
-  const balance = withheldTotal - liability;
-  const effRate = totalTaxable > 0 ? liability / totalTaxable : 0;
-
-  return {
-    ordinaryIncome: bracketBase,
-    fixedIncome: s.fixedIncome,
-    fixedLines: s.fixedLines,
-    fixedTax: s.fixedTax,
-    totalTaxable,
-    ordinaryBracketTax,
-    credit,
-    creditUsed,
-    ordinaryAfterCredit,
-    surtax,
-    surtaxThreshold: shared.surtaxThreshold,
-    liability,
-    withheldTotal,
-    balance,
-    effRate,
-  };
-}
-
-// Couple: each spouse's personal-exertion income is taxed separately (חישוב
-// נפרד). Non-exertion income is pooled into a joint calculation — capital income
-// keeps its statutory flat rate; other non-exertion income is taxed at the
-// marginal rate of the spouse with the higher (personal-exertion) income
-// (s' 66 attribution).
-function computeCouple(cfg, persons, shared) {
+// Unified computation for one or two taxpayers.
+//  - Each taxpayer's personal-exertion income → own brackets, credit, surtax.
+//  - Non-exertion income is pooled: fixed-rate capital keeps its statutory rate;
+//    capital gains are netted (losses + prior-year carry-forward offset gains, a
+//    remaining loss carries to next year); other non-exertion income is taxed at
+//    the marginal rate of the taxpayer with the higher exertion income.
+function computeAll(cfg, persons, shared) {
   const parts = persons.map((p) => ({ person: p, ...splitPersonDocs(cfg, p) }));
 
-  const spouses = parts.map((pt) => {
-    const ordinaryBracketTax = annualIncomeTax(cfg, pt.exertionIncome);
+  const taxpayers = parts.map((pt) => {
+    const bracketTax = annualIncomeTax(cfg, pt.exertionIncome);
     const credit = num(pt.person.points) * shared.pointValue;
-    const creditUsed = Math.min(credit, ordinaryBracketTax);
-    const ordinaryAfterCredit = Math.max(0, ordinaryBracketTax - credit);
+    const creditUsed = Math.min(credit, bracketTax);
+    const afterCredit = Math.max(0, bracketTax - credit);
     const surtax = shared.surtaxRate * Math.max(0, pt.exertionIncome - shared.surtaxThreshold);
+    const withheld = pt.exertionWithheld;
+    const liability = afterCredit + surtax;
     return {
       exertionIncome: pt.exertionIncome,
-      ordinaryBracketTax,
-      credit,
+      bracketTax,
       creditUsed,
-      ordinaryAfterCredit,
+      afterCredit,
       surtax,
-      liability: ordinaryAfterCredit + surtax,
-      withheld: pt.exertionWithheld,
-      get balance() {
-        return this.withheld - this.liability;
-      },
+      withheld,
+      liability,
+      balance: withheld - liability,
+      sources: pt.exertionSources,
     };
   });
 
-  const higherIdx = spouses[0].exertionIncome >= spouses[1].exertionIncome ? 0 : 1;
-  const ordHigh = spouses[higherIdx].exertionIncome;
-
-  // Fixed-rate capital — pooled, but each line keeps its own flat rate.
-  const fixedLines = parts.flatMap((pt, i) =>
-    pt.fixedLines.map((l) => ({ ...l, spouse: i }))
+  const primaryIdx = taxpayers.reduce(
+    (best, t, i, arr) => (t.exertionIncome > arr[best].exertionIncome ? i : best),
+    0
   );
-  const fixedIncome = parts.reduce((s, pt) => s + pt.fixedIncome, 0);
-  const fixedTax = parts.reduce((s, pt) => s + pt.fixedTax, 0);
-  const fixedWithheld = parts.reduce((s, pt) => s + pt.fixedWithheld, 0);
+  const primaryExertion = taxpayers[primaryIdx].exertionIncome;
 
-  // Non-exertion marginal income — taxed at the higher spouse's marginal rate.
-  const passiveIncome = parts.reduce((s, pt) => s + pt.passiveIncome, 0);
-  const passiveWithheld = parts.reduce((s, pt) => s + pt.passiveWithheld, 0);
-  const passiveRate = marginalRate(cfg, ordHigh);
-  const passiveTax = passiveIncome * passiveRate;
+  const mergeCat = (sel) => {
+    const sources = parts.flatMap((pt) => sel(pt).sources);
+    const income = sources.reduce((s, l) => s + l.income, 0);
+    const tax = sources.reduce((s, l) => s + l.income * l.rate, 0);
+    const withheld = sources.reduce((s, l) => s + l.withheld, 0);
+    return { income, tax, withheld, sources };
+  };
+  const dividend = mergeCat((pt) => pt.cap.dividend);
+  const interest = mergeCat((pt) => pt.cap.interest);
+  const otherfixed = mergeCat((pt) => pt.cap.otherfixed);
 
-  const jointIncome = fixedIncome + passiveIncome;
-  const th = shared.surtaxThreshold;
-  const jointSurtax =
-    shared.surtaxRate *
-    (Math.max(0, ordHigh + jointIncome - th) - Math.max(0, ordHigh - th));
-
-  const jointTax = fixedTax + passiveTax + jointSurtax;
-  const jointWithheld = fixedWithheld + passiveWithheld;
-  const joint = {
-    higherIdx,
-    fixedIncome,
-    fixedTax,
-    fixedLines,
-    passiveIncome,
-    passiveRate,
-    passiveTax,
-    surtax: jointSurtax,
-    income: jointIncome,
-    tax: jointTax,
-    withheld: jointWithheld,
-    balance: jointWithheld - jointTax,
+  // Capital gains: net gains and losses, then prior-year carry-forward.
+  const cgSources = parts.flatMap((pt) => pt.cap.capitalgain.sources);
+  const cgGross = cgSources.reduce((s, l) => s + l.income, 0);
+  const cgWithheld = cgSources.reduce((s, l) => s + l.withheld, 0);
+  const carryforward = parts.reduce((s, pt) => s + num(pt.person.lossCarryforward), 0);
+  const gainsRate = cfg.capitalRates.capitalgain;
+  const afterCF = cgGross - carryforward;
+  const cgTaxable = Math.max(0, afterCF);
+  const cgLossNext = Math.max(0, -afterCF);
+  const capitalgain = {
+    gross: cgGross,
+    withheld: cgWithheld,
+    sources: cgSources,
+    carryforward,
+    taxable: cgTaxable,
+    tax: cgTaxable * gainsRate,
+    lossNext: cgLossNext,
+    rate: gainsRate,
   };
 
-  const liability = spouses[0].liability + spouses[1].liability + jointTax;
-  const withheldTotal = spouses[0].withheld + spouses[1].withheld + jointWithheld;
-  const balance = spouses[0].balance + spouses[1].balance + joint.balance;
-  const totalTaxable =
-    spouses[0].exertionIncome + spouses[1].exertionIncome + jointIncome;
+  // Non-exertion marginal income.
+  const passiveSources = parts.flatMap((pt) => pt.passiveSources);
+  const passiveIncome = passiveSources.reduce((s, l) => s + l.income, 0);
+  const passiveWithheld = passiveSources.reduce((s, l) => s + l.withheld, 0);
+  const passiveRate = marginalRate(cfg, primaryExertion);
+  const passive = {
+    income: passiveIncome,
+    withheld: passiveWithheld,
+    sources: passiveSources,
+    rate: passiveRate,
+    tax: passiveIncome * passiveRate,
+  };
+
+  const pool = { dividend, interest, otherfixed, capitalgain, passive, passiveRate };
+  const poolIncome =
+    dividend.income + interest.income + otherfixed.income + cgTaxable + passiveIncome;
+  const th = shared.surtaxThreshold;
+  const poolSurtax =
+    shared.surtaxRate *
+    (Math.max(0, primaryExertion + poolIncome - th) - Math.max(0, primaryExertion - th));
+
+  const capTax =
+    dividend.tax + interest.tax + otherfixed.tax + capitalgain.tax + passive.tax;
+  const poolTax = capTax + poolSurtax;
+  const jointWithheld =
+    dividend.withheld +
+    interest.withheld +
+    otherfixed.withheld +
+    capitalgain.withheld +
+    passive.withheld;
+  const jointBalance = jointWithheld - poolTax;
+
+  const liability = taxpayers.reduce((s, t) => s + t.liability, 0) + poolTax;
+  const withheldTotal = taxpayers.reduce((s, t) => s + t.withheld, 0) + jointWithheld;
+  const balance = withheldTotal - liability;
+  const totalTaxable = taxpayers.reduce((s, t) => s + t.exertionIncome, 0) + poolIncome;
   const household = {
     liability,
-    withheldTotal,
+    withheld: withheldTotal,
     balance,
     totalTaxable,
     effRate: totalTaxable > 0 ? liability / totalTaxable : 0,
   };
 
-  return { spouses, joint, household };
+  return { taxpayers, pool, poolSurtax, poolTax, jointWithheld, jointBalance, primaryIdx, household };
 }
 
-// ----- shared field components (matching NetPensionCalculator) -----
+// Build the collapsible, per-income-type breakdown groups.
+function buildGroups(res, mode, names) {
+  const couple = mode === "couple";
+  const groups = [];
 
-function NumField({ label, value, onChange, placeholder, suffix, thousands, asText, hint }) {
+  // 1) Personal-exertion income.
+  const salaryIncome = res.taxpayers.reduce((s, t) => s + t.exertionIncome, 0);
+  const salaryTax = res.taxpayers.reduce((s, t) => s + t.afterCredit, 0);
+  const salaryRows = [];
+  res.taxpayers.forEach((t, i) => {
+    if (couple) salaryRows.push({ label: names[i], value: "", strong: true });
+    t.sources.forEach((src) =>
+      salaryRows.push({ label: `  ${src.label}`, value: ILS.format(src.income), muted: true })
+    );
+    salaryRows.push({ label: "  מס לפי מדרגות", value: ILS.format(t.bracketTax), muted: true });
+    salaryRows.push({ label: "  זיכוי נקודות זיכוי", value: ILSminus(t.creditUsed), muted: true });
+    salaryRows.push({ label: "  מס על יגיעה אישית", value: ILS.format(t.afterCredit) });
+  });
+  groups.push({ key: "salary", title: "הכנסה מיגיעה אישית", income: salaryIncome, tax: salaryTax, rows: salaryRows });
+
+  // 2) Flat-rate capital categories.
+  const flat = (cat, title, key) => {
+    if (cat.income <= 0.5) return;
+    const rows = cat.sources
+      .filter((s) => Math.abs(s.income) > 0.5)
+      .map((s) => ({
+        label: `  ${s.label}`,
+        value: `${ILS.format(s.income)} × ${(s.rate * 100).toFixed(0)}% = ${ILS.format(
+          s.income * s.rate
+        )}`,
+        muted: true,
+      }));
+    groups.push({ key, title, income: cat.income, tax: cat.tax, rows });
+  };
+  flat(res.pool.dividend, "דיבידנד", "dividend");
+  flat(res.pool.interest, "ריבית", "interest");
+
+  // 3) Capital gains (with loss offset + carry-forward).
+  const cg = res.pool.capitalgain;
+  if (Math.abs(cg.gross) > 0.5 || cg.carryforward > 0.5) {
+    const rows = cg.sources
+      .filter((s) => Math.abs(s.income) > 0.5)
+      .map((s) => ({
+        label: `  ${s.label} — ${s.income >= 0 ? "רווח" : "הפסד"}`,
+        value: ILS.format(s.income),
+        muted: true,
+      }));
+    if (cg.carryforward > 0.5)
+      rows.push({
+        label: "  הפסדים מועברים משנים קודמות",
+        value: ILSminus(cg.carryforward),
+        muted: true,
+      });
+    rows.push({ label: "  רווח הון חייב (אחרי קיזוז)", value: ILS.format(cg.taxable) });
+    rows.push({ label: `  מס רווח הון (${(cg.rate * 100).toFixed(0)}%)`, value: ILS.format(cg.tax) });
+    if (cg.lossNext > 0.5)
+      rows.push({
+        label: "  הפסד הון מועבר לשנה הבאה",
+        value: ILS.format(cg.lossNext),
+        muted: true,
+      });
+    groups.push({ key: "capitalgain", title: "רווח הון", income: cg.taxable, tax: cg.tax, rows });
+  }
+
+  flat(res.pool.otherfixed, "הכנסה אחרת (שיעור קבוע)", "otherfixed");
+
+  // 4) Non-exertion marginal income.
+  const pas = res.pool.passive;
+  if (pas.income > 0.5) {
+    const rows = pas.sources
+      .filter((s) => Math.abs(s.income) > 0.5)
+      .map((s) => ({ label: `  ${s.label}`, value: ILS.format(s.income), muted: true }));
+    rows.push({
+      label: `  שיעור מס${couple ? ` (${names[res.primaryIdx]})` : ""} ${(pas.rate * 100).toFixed(0)}%`,
+      value: ILS.format(pas.tax),
+    });
+    groups.push({
+      key: "passive",
+      title: "הכנסה שאינה מיגיעה אישית (שיעור שולי)",
+      income: pas.income,
+      tax: pas.tax,
+      rows,
+    });
+  }
+
+  // 5) Surtax.
+  const totalSurtax = res.taxpayers.reduce((s, t) => s + t.surtax, 0) + res.poolSurtax;
+  if (totalSurtax > 0.5) {
+    const rows = [];
+    res.taxpayers.forEach((t, i) => {
+      if (t.surtax > 0.5)
+        rows.push({
+          label: `  ${couple ? names[i] : "על יגיעה אישית"}`,
+          value: ILS.format(t.surtax),
+          muted: true,
+        });
+    });
+    if (res.poolSurtax > 0.5)
+      rows.push({ label: "  על הכנסה שאינה מיגיעה אישית", value: ILS.format(res.poolSurtax), muted: true });
+    groups.push({ key: "surtax", title: "מס יסף", income: null, tax: totalSurtax, rows });
+  }
+
+  return groups;
+}
+
+// ----- shared field components -----
+
+function NumField({ label, value, onChange, placeholder, suffix, thousands, asText, signed, hint }) {
   const handle = (e) =>
-    onChange(thousands ? formatThousands(e.target.value) : e.target.value);
+    onChange(thousands ? formatThousands(e.target.value, signed) : e.target.value);
   return (
     <div>
       {label && (
@@ -281,7 +397,7 @@ function NumField({ label, value, onChange, placeholder, suffix, thousands, asTe
       <div className="relative">
         <input
           type={thousands || asText ? "text" : "number"}
-          inputMode={thousands || asText ? "numeric" : "decimal"}
+          inputMode={thousands || asText ? (signed ? "text" : "numeric") : "decimal"}
           dir="ltr"
           value={value}
           placeholder={placeholder}
@@ -299,12 +415,10 @@ function NumField({ label, value, onChange, placeholder, suffix, thousands, asTe
   );
 }
 
-function Row({ label, value, strong, muted }) {
+function Row({ label, value, strong }) {
   return (
     <div className="flex items-center justify-between px-4 py-2.5">
-      <dt className={strong ? "font-bold text-ink" : muted ? "text-ink-soft" : "text-ink"}>
-        {label}
-      </dt>
+      <dt className={strong ? "font-bold text-ink" : "text-ink"}>{label}</dt>
       <dd
         dir="rtl"
         className={strong ? "font-extrabold text-brand-700" : "font-semibold text-ink"}
@@ -365,7 +479,6 @@ export default function IncomeTaxCalculator() {
 
   const isCouple = mode === "couple";
 
-  // Switch between individual and couple, keeping the first taxpayer's data.
   const switchMode = (m) => {
     setMode(m);
     setPersons((ps) => {
@@ -375,7 +488,6 @@ export default function IncomeTaxCalculator() {
     });
   };
 
-  // ----- per-person handlers -----
   const setPerson = (pid, patch) =>
     setPersons((ps) => ps.map((p) => (p.id === pid ? { ...p, ...patch } : p)));
   const setGender = (pid, g) =>
@@ -404,34 +516,26 @@ export default function IncomeTaxCalculator() {
       surtaxRate: num(shared.surtaxRate) / 100,
       surtaxThreshold: num(shared.surtaxThreshold),
     };
-    if (mode === "couple" && persons.length === 2) {
-      return { mode: "couple", ...computeCouple(cfg, persons, sharedNums) };
-    }
-    const single = computePerson(cfg, persons[0], sharedNums);
-    return {
-      mode: "single",
-      single,
-      household: {
-        liability: single.liability,
-        withheldTotal: single.withheldTotal,
-        balance: single.balance,
-        totalTaxable: single.totalTaxable,
-        effRate: single.effRate,
-      },
-    };
-  }, [cfg, persons, shared, mode]);
+    const people = isCouple && persons.length === 2 ? persons : [persons[0]];
+    return computeAll(cfg, people, sharedNums);
+  }, [cfg, persons, shared, isCouple]);
 
   const household = calc.household;
   const isRefund = household.balance >= 0;
+  const names = persons.map((p, i) => personName(p, i, mode));
+  const groups = buildGroups(calc, mode, names);
+  const totals = {
+    liability: household.liability,
+    withheld: household.withheld,
+    balance: household.balance,
+    lossNext: calc.pool.capitalgain.lossNext,
+  };
 
-  // Per-column balances shown as chips in couple mode.
   const chips = isCouple
     ? [
-        ...persons.map((p, i) => ({
-          name: personName(p, i, mode),
-          balance: calc.spouses[i].balance,
-        })),
-        { name: "חישוב משותף", balance: calc.joint.balance },
+        { name: names[0], balance: calc.taxpayers[0].balance },
+        { name: names[1], balance: calc.taxpayers[1].balance },
+        { name: "חישוב משותף", balance: calc.jointBalance },
       ]
     : [];
 
@@ -461,10 +565,9 @@ export default function IncomeTaxCalculator() {
         </div>
         {isCouple && (
           <p className="mt-2 text-xs text-ink-soft">
-            הכנסה מיגיעה אישית של כל בן זוג ממוסה בנפרד (מדרגות המס ונקודות הזיכוי
-            שלו). הכנסות הון בשיעור קבוע ממוסות בשיעור הקבוע; הכנסה אחרת שאינה
-            מיגיעה אישית ממוסה בחישוב המשותף לפי שיעור המס של בן הזוג בעל ההכנסה
-            הגבוהה.
+            הכנסה מיגיעה אישית של כל בן זוג ממוסה בנפרד. הכנסות הון בשיעור קבוע
+            ממוסות בשיעור הקבוע; הכנסה אחרת שאינה מיגיעה אישית ממוסה בחישוב המשותף
+            לפי שיעור המס של בן הזוג בעל ההכנסה הגבוהה.
           </p>
         )}
       </div>
@@ -473,7 +576,6 @@ export default function IncomeTaxCalculator() {
       {persons.map((p, i) => (
         <PersonCard
           key={p.id}
-          cfg={cfg}
           person={p}
           title={personName(p, i, mode)}
           showName={isCouple}
@@ -481,6 +583,7 @@ export default function IncomeTaxCalculator() {
           onName={(v) => setPerson(p.id, { name: v })}
           onGender={(g) => setGender(p.id, g)}
           onPoints={(v) => setPerson(p.id, { points: v })}
+          onLoss={(v) => setPerson(p.id, { lossCarryforward: v })}
           onDocChange={(did, patch) => setDoc(p.id, did, patch)}
           onAddDoc={(type) => addDoc(p.id, type)}
           onRemoveDoc={(did) => removeDoc(p.id, did)}
@@ -516,12 +619,11 @@ export default function IncomeTaxCalculator() {
           </p>
           <p className="mt-2 text-xs text-ink-soft">
             סה״כ חבות מס {ILS.format(household.liability)} · נוכה במקור{" "}
-            {ILS.format(household.withheldTotal)} · שיעור מס אפקטיבי{" "}
+            {ILS.format(household.withheld)} · שיעור מס אפקטיבי{" "}
             {(household.effRate * 100).toFixed(1)}%
           </p>
         </div>
 
-        {/* Per-column summary chips */}
         {isCouple && (
           <div className="mt-4 grid gap-3 sm:grid-cols-3">
             {chips.map((c, i) => {
@@ -555,24 +657,13 @@ export default function IncomeTaxCalculator() {
             onClick={() => setShowDetail((v) => !v)}
             className="flex w-full items-center justify-between px-4 py-3 text-sm font-semibold text-ink"
           >
-            <span>פירוט חישוב המס</span>
+            <span>פירוט חישוב המס (לפי סוגי הכנסה)</span>
             <span className="text-ink-soft">{showDetail ? "−" : "+"}</span>
           </button>
-          {showDetail &&
-            (isCouple ? (
-              <CoupleBreakdown
-                spouses={calc.spouses}
-                joint={calc.joint}
-                household={household}
-                names={persons.map((p, i) => personName(p, i, mode))}
-                surtaxRatePct={num(shared.surtaxRate)}
-              />
-            ) : (
-              <PersonBreakdown r={calc.single} surtaxRatePct={num(shared.surtaxRate)} />
-            ))}
+          {showDetail && <BreakdownGroups groups={groups} totals={totals} />}
         </div>
 
-        {/* Editable assumptions (statutory, shared) */}
+        {/* Editable assumptions */}
         <div className="mt-3 rounded-xl border border-slate-100">
           <button
             type="button"
@@ -613,10 +704,85 @@ export default function IncomeTaxCalculator() {
   );
 }
 
+// ----- collapsible breakdown grouped by income type -----
+
+function BreakdownGroups({ groups, totals }) {
+  const [open, setOpen] = useState(() => new Set());
+  const toggle = (k) =>
+    setOpen((o) => {
+      const n = new Set(o);
+      n.has(k) ? n.delete(k) : n.add(k);
+      return n;
+    });
+
+  return (
+    <div className="border-t border-slate-100">
+      {groups.map((g) => (
+        <div key={g.key} className="border-b border-slate-100">
+          <button
+            type="button"
+            onClick={() => toggle(g.key)}
+            className="flex w-full items-center justify-between gap-3 px-4 py-3 text-right"
+          >
+            <span className="flex items-center gap-2 font-semibold text-ink">
+              <span className="w-3 text-ink-soft">{open.has(g.key) ? "−" : "+"}</span>
+              {g.title}
+            </span>
+            <span dir="rtl" className="flex items-center gap-4 text-sm">
+              {g.income != null && (
+                <span className="text-ink-soft">{ILS.format(g.income)}</span>
+              )}
+              <span className="min-w-[5rem] font-bold text-brand-700">
+                {ILS.format(g.tax)}
+              </span>
+            </span>
+          </button>
+          {open.has(g.key) && (
+            <dl className="bg-slate-50 px-2 pb-2">
+              {g.rows.map((r, i) => (
+                <div
+                  key={i}
+                  className="flex items-center justify-between gap-3 px-3 py-1.5 text-sm"
+                >
+                  <dt
+                    className={
+                      r.strong ? "font-bold text-ink" : r.muted ? "text-ink-soft" : "text-ink"
+                    }
+                  >
+                    {r.label}
+                  </dt>
+                  <dd dir="rtl" className="whitespace-nowrap font-medium text-ink">
+                    {r.value}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          )}
+        </div>
+      ))}
+
+      <dl className="divide-y divide-slate-100 border-t-2 border-slate-200 text-sm">
+        <Row label="סה״כ חבות מס" value={ILS.format(totals.liability)} strong />
+        <Row label="מס שנוכה במקור" value={ILSminus(totals.withheld)} />
+        <Row
+          label={totals.balance >= 0 ? "החזר מס צפוי" : "יתרת מס לתשלום"}
+          value={ILS.format(Math.abs(totals.balance))}
+          strong
+        />
+        {totals.lossNext > 0.5 && (
+          <Row
+            label="הפסד הון מועבר לשנה הבאה"
+            value={ILS.format(totals.lossNext)}
+          />
+        )}
+      </dl>
+    </div>
+  );
+}
+
 // ----- one taxpayer: personal details + their documents -----
 
 function PersonCard({
-  cfg,
   person,
   title,
   showName,
@@ -624,6 +790,7 @@ function PersonCard({
   onName,
   onGender,
   onPoints,
+  onLoss,
   onDocChange,
   onAddDoc,
   onRemoveDoc,
@@ -686,14 +853,25 @@ function PersonCard({
         ({num(person.points)} × {ILS.format(pointValueNum)} לנקודה)
       </p>
 
+      <div className="mt-4 sm:max-w-[50%]">
+        <NumField
+          label="הפסדי הון מועברים משנים קודמות"
+          value={person.lossCarryforward}
+          placeholder="0"
+          suffix="₪"
+          thousands
+          onChange={onLoss}
+          hint="יקוזזו כנגד רווחי הון השנה; יתרה תועבר לשנה הבאה."
+        />
+      </div>
+
       {/* Documents */}
       <div className="mt-6">
         <h4 className="mb-1 font-bold text-ink">מסמכים והכנסות</h4>
         <p className="mb-4 text-sm text-ink-soft">
           טופס <span className="font-semibold text-ink">106</span> — משכורת והמס
           שנוכה; טופס <span className="font-semibold text-ink">867</span> — הכנסות
-          מהון (ריבית, דיבידנד, רווחי הון) והמס שנוכה במקור; "מסמך אחר" — לכל הכנסה
-          נוספת.
+          מהון (ניתן להזין כמה שורות בטופס אחד); "מסמך אחר" — לכל הכנסה נוספת.
         </p>
 
         <div className="space-y-4">
@@ -704,11 +882,6 @@ function PersonCard({
               index={idx}
               onChange={(patch) => onDocChange(d.id, patch)}
               onRemove={person.docs.length > 1 ? () => onRemoveDoc(d.id) : null}
-              defaultRate={
-                d.type === "867"
-                  ? cfg.capitalRates[d.category]
-                  : cfg.capitalRates.other
-              }
             />
           ))}
         </div>
@@ -741,246 +914,21 @@ function PersonCard({
   );
 }
 
-// ----- breakdown: individual (single dl) -----
+// ----- a single document card -----
 
-function PersonBreakdown({ r, surtaxRatePct }) {
-  const refund = r.balance >= 0;
-  return (
-    <dl className="divide-y divide-slate-100 border-t border-slate-100 text-sm">
-      <Row label="הכנסה חייבת (מדרגות מס)" value={ILS.format(r.ordinaryIncome)} />
-      <Row
-        label="מס לפי מדרגות (לפני זיכויים)"
-        value={ILS.format(r.ordinaryBracketTax)}
-      />
-      <Row label="זיכוי נקודות זיכוי" value={ILSminus(r.creditUsed)} />
-      <Row
-        label="מס על הכנסה במדרגות (אחרי זיכוי)"
-        value={ILS.format(r.ordinaryAfterCredit)}
-      />
-      {r.fixedIncome > 0 && (
-        <Row label="הכנסה מהון (שיעור קבוע)" value={ILS.format(r.fixedIncome)} />
-      )}
-      {r.fixedLines.map((l) => (
-        <Row
-          key={l.id}
-          muted
-          label={`  ${categoryLabel(l.category)} — ${(l.rate * 100).toFixed(
-            0
-          )}% על ${ILS.format(l.income)}`}
-          value={ILS.format(l.income * l.rate)}
-        />
-      ))}
-      {r.fixedTax > 0 && (
-        <Row label="סה״כ מס על הון (שיעור קבוע)" value={ILS.format(r.fixedTax)} />
-      )}
-      {r.surtax > 0 && (
-        <Row
-          label={`מס יסף (${surtaxRatePct}% מעל ${ILS.format(r.surtaxThreshold)})`}
-          value={ILS.format(r.surtax)}
-        />
-      )}
-      <Row label="סה״כ חבות מס" value={ILS.format(r.liability)} strong />
-      <Row label="מס שנוכה במקור" value={ILSminus(r.withheldTotal)} />
-      <Row
-        label={refund ? "החזר מס צפוי" : "יתרת מס לתשלום"}
-        value={ILS.format(Math.abs(r.balance))}
-        strong
-      />
-    </dl>
-  );
-}
-
-// ----- breakdown: couple (columnar table) -----
-
-const dash = { v: "—", cls: "text-ink-soft" };
-const money = (x) => ({ v: ILS.format(x) });
-const minus = (x) => ({ v: ILSminus(x) });
-const balCell = (x) => ({
-  v: ILS.format(Math.abs(x)),
-  cls: `font-extrabold ${x >= 0 ? "text-brand-700" : "text-amber-700"}`,
-});
-
-function TR({ label, cells, strong, muted }) {
-  return (
-    <tr className={strong ? "bg-slate-50" : ""}>
-      <td
-        className={`whitespace-nowrap px-3 py-2 text-right ${
-          strong ? "font-bold text-ink" : muted ? "text-ink-soft" : "text-ink"
-        }`}
-      >
-        {label}
-      </td>
-      {cells.map((c, i) => {
-        // A cell's own color class fully controls it; otherwise fall back to the
-        // row's strong/normal default so the two never conflict.
-        const cls =
-          c.cls || (strong ? "font-extrabold text-brand-700" : "font-semibold text-ink");
-        return (
-          <td
-            key={i}
-            dir="rtl"
-            className={`whitespace-nowrap px-3 py-2 text-center ${cls}`}
-          >
-            {c.v}
-          </td>
-        );
-      })}
-    </tr>
-  );
-}
-
-function CoupleBreakdown({ spouses, joint, household, names, surtaxRatePct }) {
-  const [s0, s1] = spouses;
-  const hasSurtax = s0.surtax + s1.surtax + joint.surtax > 0.5;
-  const higherName = names[joint.higherIdx];
-
-  return (
-    <div className="border-t border-slate-100">
-      <div className="overflow-x-auto">
-        <table dir="rtl" className="w-full min-w-[560px] text-sm">
-          <thead>
-            <tr className="border-b border-slate-200 bg-slate-50">
-              <th className="px-3 py-2 text-right font-semibold text-ink">סעיף</th>
-              <th className="px-3 py-2 text-center font-semibold text-ink">
-                {names[0]}
-              </th>
-              <th className="px-3 py-2 text-center font-semibold text-ink">
-                {names[1]}
-              </th>
-              <th className="px-3 py-2 text-center font-semibold text-ink">
-                חישוב משותף
-              </th>
-              <th className="px-3 py-2 text-center font-semibold text-ink">סה״כ</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            <TR
-              label="הכנסה מיגיעה אישית"
-              cells={[
-                money(s0.exertionIncome),
-                money(s1.exertionIncome),
-                dash,
-                money(s0.exertionIncome + s1.exertionIncome),
-              ]}
-            />
-            <TR
-              label="מס לפי מדרגות (לפני זיכוי)"
-              muted
-              cells={[
-                money(s0.ordinaryBracketTax),
-                money(s1.ordinaryBracketTax),
-                dash,
-                dash,
-              ]}
-            />
-            <TR
-              label="זיכוי נקודות זיכוי"
-              muted
-              cells={[minus(s0.creditUsed), minus(s1.creditUsed), dash, dash]}
-            />
-            <TR
-              label="מס על יגיעה אישית (אחרי זיכוי)"
-              cells={[
-                money(s0.ordinaryAfterCredit),
-                money(s1.ordinaryAfterCredit),
-                dash,
-                money(s0.ordinaryAfterCredit + s1.ordinaryAfterCredit),
-              ]}
-            />
-            {joint.fixedIncome > 0 && (
-              <TR
-                label="הכנסה מהון (שיעור קבוע)"
-                cells={[dash, dash, money(joint.fixedIncome), money(joint.fixedIncome)]}
-              />
-            )}
-            {joint.fixedIncome > 0 && (
-              <TR
-                label="מס על הון (שיעור קבוע)"
-                cells={[dash, dash, money(joint.fixedTax), money(joint.fixedTax)]}
-              />
-            )}
-            {joint.passiveIncome > 0 && (
-              <TR
-                label="הכנסה שאינה מיגיעה אישית (שיעור שולי)"
-                cells={[
-                  dash,
-                  dash,
-                  money(joint.passiveIncome),
-                  money(joint.passiveIncome),
-                ]}
-              />
-            )}
-            {joint.passiveIncome > 0 && (
-              <TR
-                label={`מס לפי שיעור בן/בת הזוג (${(joint.passiveRate * 100).toFixed(
-                  0
-                )}%)`}
-                cells={[dash, dash, money(joint.passiveTax), money(joint.passiveTax)]}
-              />
-            )}
-            {hasSurtax && (
-              <TR
-                label={`מס יסף (${surtaxRatePct}%)`}
-                cells={[
-                  s0.surtax > 0.5 ? money(s0.surtax) : dash,
-                  s1.surtax > 0.5 ? money(s1.surtax) : dash,
-                  joint.surtax > 0.5 ? money(joint.surtax) : dash,
-                  money(s0.surtax + s1.surtax + joint.surtax),
-                ]}
-              />
-            )}
-            <TR
-              label="סה״כ חבות מס"
-              strong
-              cells={[
-                money(s0.liability),
-                money(s1.liability),
-                money(joint.tax),
-                money(household.liability),
-              ]}
-            />
-            <TR
-              label="מס שנוכה במקור"
-              cells={[
-                minus(s0.withheld),
-                minus(s1.withheld),
-                minus(joint.withheld),
-                minus(household.withheldTotal),
-              ]}
-            />
-            <TR
-              label="החזר (+) / לתשלום (−)"
-              strong
-              cells={[
-                balCell(s0.balance),
-                balCell(s1.balance),
-                balCell(joint.balance),
-                balCell(household.balance),
-              ]}
-            />
-          </tbody>
-        </table>
-      </div>
-      <p className="px-3 py-3 text-xs text-ink-soft">
-        הכנסות הון בשיעור קבוע (דיבידנד/ריבית/רווח הון) ממוסות בשיעור הקבוע בחוק.
-        {joint.passiveIncome > 0 &&
-          ` הכנסה אחרת שאינה מיגיעה אישית ממוסה לפי שיעור המס השולי של ${higherName} (${(
-            joint.passiveRate * 100
-          ).toFixed(0)}%).`}
-      </p>
-    </div>
-  );
-}
-
-// ----- a single document card, rendered per type -----
-
-function DocCard({ doc, index, onChange, onRemove, defaultRate }) {
+function DocCard({ doc, index, onChange, onRemove }) {
   const title =
     doc.type === "106"
       ? "טופס 106 — משכורת"
       : doc.type === "867"
       ? "טופס 867 — הכנסות מהון"
       : "מסמך אחר";
+
+  // 867 line handlers.
+  const setLine = (lid, patch) =>
+    onChange({ lines: doc.lines.map((l) => (l.id === lid ? { ...l, ...patch } : l)) });
+  const addLine = () => onChange({ lines: [...doc.lines, newLine867()] });
+  const removeLine = (lid) => onChange({ lines: doc.lines.filter((l) => l.id !== lid) });
 
   return (
     <div className="rounded-xl border border-slate-100 bg-slate-50 p-4">
@@ -1030,48 +978,86 @@ function DocCard({ doc, index, onChange, onRemove, defaultRate }) {
       )}
 
       {doc.type === "867" && (
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Select
-            label="סוג ההכנסה"
-            value={doc.category}
-            onChange={(v) => onChange({ category: v })}
-            options={CAPITAL_CATEGORIES}
+        <>
+          <input
+            type="text"
+            value={doc.description}
+            placeholder={`תיאור הטופס (לדוגמה: בנק / בית השקעות)`}
+            onChange={(e) => onChange({ description: e.target.value })}
+            className="mb-3 w-full max-w-[70%] rounded-lg border border-slate-200 px-3 py-1.5 text-sm outline-none focus:border-brand-500"
           />
-          <NumField
-            label="שיעור מס"
-            value={doc.rate}
-            placeholder={String((defaultRate ?? 0.25) * 100)}
-            suffix="%"
-            asText
-            hint="ברירת מחדל לפי סוג ההכנסה. ריבית על פיקדון שקלי לרוב 15%."
-            onChange={(v) => onChange({ rate: v })}
-          />
-          <NumField
-            label="סכום ההכנסה"
-            value={doc.income}
-            placeholder="0"
-            suffix="₪"
-            thousands
-            onChange={(v) => onChange({ income: v })}
-          />
-          <NumField
-            label="מס שנוכה במקור"
-            value={doc.withheld}
-            placeholder="0"
-            suffix="₪"
-            thousands
-            onChange={(v) => onChange({ withheld: v })}
-          />
-        </div>
+          <div className="space-y-3">
+            {doc.lines.map((ln) => {
+              const isGain = ln.category === "capitalgain";
+              return (
+                <div key={ln.id} className="rounded-lg border border-slate-200 bg-white p-3">
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <div className="flex-1">
+                      <Select
+                        value={ln.category}
+                        onChange={(v) => setLine(ln.id, { category: v })}
+                        options={CAPITAL_CATEGORIES}
+                      />
+                    </div>
+                    {doc.lines.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => removeLine(ln.id)}
+                        className="shrink-0 text-sm font-medium text-red-600 hover:underline"
+                      >
+                        הסרת שורה
+                      </button>
+                    )}
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <NumField
+                      label="סכום ההכנסה"
+                      value={ln.income}
+                      placeholder="0"
+                      suffix="₪"
+                      thousands
+                      signed={isGain}
+                      hint={isGain ? "סכום שלילי = הפסד הון" : undefined}
+                      onChange={(v) => setLine(ln.id, { income: v })}
+                    />
+                    {!isGain && (
+                      <NumField
+                        label="שיעור מס"
+                        value={ln.rate}
+                        placeholder="25"
+                        suffix="%"
+                        asText
+                        onChange={(v) => setLine(ln.id, { rate: v })}
+                      />
+                    )}
+                    <NumField
+                      label="מס שנוכה במקור"
+                      value={ln.withheld}
+                      placeholder="0"
+                      suffix="₪"
+                      thousands
+                      onChange={(v) => setLine(ln.id, { withheld: v })}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <button
+            type="button"
+            onClick={addLine}
+            className="mt-3 text-sm font-semibold text-brand-700 hover:underline"
+          >
+            + הוספת שורה
+          </button>
+        </>
       )}
 
       {doc.type === "other" && (
         <>
           <div className="mb-3 grid gap-3 sm:grid-cols-2">
             <div>
-              <label className="mb-1 block text-sm font-medium text-ink">
-                תיאור
-              </label>
+              <label className="mb-1 block text-sm font-medium text-ink">תיאור</label>
               <input
                 type="text"
                 value={doc.label}
