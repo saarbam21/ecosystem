@@ -39,5 +39,43 @@
     "minDays": 45,
     "paidOn": "ישולם על ידי מופת",
     "amount": 2000
+  },
+  "additionalComp": {
+    "pointValue": 2904,
+    "paidOn": "ישולם ב-1.5.2027 (מדורג לפי סך הימים בשנה)",
+    "tiers": [
+      { "minDays": 10, "points": 0.5 },
+      { "minDays": 15, "points": 1 },
+      { "minDays": 20, "points": 1.5 },
+      { "minDays": 37, "points": 2 }
+    ]
+  },
+  "benefits": {
+    "vacationVoucher": {
+      "minDays": 45,
+      "supplementFromDay": 46,
+      "supplementToDay": 60,
+      "paidOn": "שובר חד־פעמי, יינתן בקיץ 2026 (מימוש עד סוף 2028)",
+      "byGrade": {
+        "aplus": { "base": 2630, "perDay": 58, "max": 3500, "baseChild": 3375, "perDayChild": 75, "maxChild": 4500 },
+        "a": { "base": 2200, "perDay": 50, "max": 2950, "baseChild": 2925, "perDayChild": 65, "maxChild": 3900 },
+        "b": { "base": 1700, "perDay": 40, "max": 2300, "baseChild": 2250, "perDayChild": 50, "maxChild": 3000 },
+        "c": { "base": 780, "perDay": 18, "max": 1050, "baseChild": 1020, "perDayChild": 22, "maxChild": 1350 },
+        "d": { "base": 780, "perDay": 18, "max": 1050, "baseChild": 1020, "perDayChild": 22, "maxChild": 1350 },
+        "e": { "base": 605, "perDay": 13, "max": 800, "baseChild": 760, "perDayChild": 16, "maxChild": 1000 }
+      }
+    },
+    "fighterWallet": {
+      "minDays": 10,
+      "paidOn": "נטען לארנק הדיגיטלי (Fighter), קיץ 2026",
+      "byGrade": {
+        "aplus": { "tiers": [ { "upto": 30, "rate": 45 }, { "upto": 45, "rate": 120 }, { "upto": null, "rate": 70 } ], "max": 5000 },
+        "a": { "tiers": [ { "upto": 30, "rate": 40 }, { "upto": 45, "rate": 100 }, { "upto": null, "rate": 60 } ], "max": 4250 },
+        "b": { "tiers": [ { "upto": 30, "rate": 30 }, { "upto": 45, "rate": 80 }, { "upto": null, "rate": 45 } ], "max": 3250 },
+        "c": { "tiers": [], "max": 0 },
+        "d": { "tiers": [], "max": 0 },
+        "e": { "tiers": [], "max": 0 }
+      }
+    }
   }
 }

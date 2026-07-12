@@ -254,8 +254,11 @@ export default function MiluimCalculator() {
     const familyGrantV = d("familyGrant");
     const householdGrant = d("householdGrant");
     const specialFamilyGrant = d("specialFamilyGrant");
+    const additionalComp = d("additionalComp");
+    const vacationVoucher = d("vacationVoucher");
+    const fighterWallet = d("fighterWallet");
     const recurringTotal = reservePay + personalExpenses + familyGrantV;
-    const oneTimeTotal = specialComp + householdGrant + specialFamilyGrant;
+    const oneTimeTotal = specialComp + additionalComp + householdGrant + specialFamilyGrant;
     const total = recurringTotal + oneTimeTotal;
     const mdays = end - start;
     return {
@@ -273,6 +276,10 @@ export default function MiluimCalculator() {
       familyGrant: familyGrantV,
       householdGrant,
       specialFamilyGrant,
+      additionalComp,
+      vacationVoucher,
+      fighterWallet,
+      benefitsTotal: vacationVoucher + fighterWallet,
       recurringTotal,
       oneTimeTotal,
       total,
@@ -424,6 +431,13 @@ export default function MiluimCalculator() {
                       note={cfg.specialComp.paidOn}
                     />
                   )}
+                  {result.additionalComp > 0 && (
+                    <Row
+                      label={`תגמול נוסף — ${result.acPoints} נק׳ זיכוי`}
+                      value={ILS.format(result.additionalComp)}
+                      note={cfg.additionalComp.paidOn}
+                    />
+                  )}
                   {result.householdGrant > 0 && (
                     <Row
                       label="מענק כלכלת הבית מוגדל"
@@ -443,6 +457,27 @@ export default function MiluimCalculator() {
               )}
 
               <Row label="סה״כ צפוי (ברוטו)" value={ILS.format(result.total)} strong />
+
+              {result.benefitsTotal > 0 && (
+                <>
+                  <GroupHeader>הטבות נוספות (לא כספיות · אינן נכללות בסך התגמול)</GroupHeader>
+                  {result.vacationVoucher > 0 && (
+                    <Row
+                      label="שובר נופש"
+                      value={ILS.format(result.vacationVoucher)}
+                      note={cfg.benefits.vacationVoucher.paidOn}
+                    />
+                  )}
+                  {result.fighterWallet > 0 && (
+                    <Row
+                      label="ארנק דיגיטלי (Fighter)"
+                      value={ILS.format(result.fighterWallet)}
+                      note={cfg.benefits.fighterWallet.paidOn}
+                    />
+                  )}
+                  <Row label="סה״כ הטבות נוספות" value={ILS.format(result.benefitsTotal)} strong muted />
+                </>
+              )}
             </dl>
           )}
         </div>
@@ -561,7 +596,7 @@ export default function MiluimCalculator() {
               </p>
             </div>
 
-            {monthly && monthly.total !== 0 && (
+            {monthly && (monthly.total !== 0 || monthly.benefitsTotal !== 0) && (
               <dl className="mt-4 divide-y divide-slate-100 rounded-xl border border-slate-100 text-sm">
                 <GroupHeader>שוטף (החודש)</GroupHeader>
                 {monthly.reservePay > 0 && (
@@ -607,6 +642,13 @@ export default function MiluimCalculator() {
                         note={cfg.householdGrant.paidOn}
                       />
                     )}
+                    {monthly.additionalComp > 0 && (
+                      <Row
+                        label="תגמול נוסף (מזוכה החודש)"
+                        value={ILS.format(monthly.additionalComp)}
+                        note={cfg.additionalComp.paidOn}
+                      />
+                    )}
                     {monthly.specialFamilyGrant > 0 && (
                       <Row
                         label="מענק משפחה מיוחדת (מזוכה החודש)"
@@ -619,6 +661,19 @@ export default function MiluimCalculator() {
                 )}
 
                 <Row label="סה״כ לחודש" value={ILS.format(monthly.total)} strong />
+
+                {monthly.benefitsTotal > 0 && (
+                  <>
+                    <GroupHeader>הטבות נוספות (לא כספיות · אינן נכללות בסך)</GroupHeader>
+                    {monthly.vacationVoucher > 0 && (
+                      <Row label="שובר נופש (מזוכה החודש)" value={ILS.format(monthly.vacationVoucher)} />
+                    )}
+                    {monthly.fighterWallet > 0 && (
+                      <Row label="ארנק דיגיטלי (Fighter)" value={ILS.format(monthly.fighterWallet)} />
+                    )}
+                    <Row label="סה״כ הטבות נוספות" value={ILS.format(monthly.benefitsTotal)} strong muted />
+                  </>
+                )}
               </dl>
             )}
           </>
