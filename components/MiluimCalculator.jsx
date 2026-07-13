@@ -225,11 +225,11 @@ export default function MiluimCalculator() {
 
   // Per-category open/close within the breakdown (keeps a crowded list tidy).
   const [openGroups, setOpenGroups] = useState({
-    recurring: true,
-    oneTime: true,
+    recurring: false,
+    oneTime: false,
     benefits: false,
-    mRecurring: true,
-    mOneTime: true,
+    mRecurring: false,
+    mOneTime: false,
     mBenefits: false,
   });
   const toggleGroup = (k) => setOpenGroups((g) => ({ ...g, [k]: !g[k] }));
