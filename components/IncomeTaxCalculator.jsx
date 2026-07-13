@@ -59,7 +59,6 @@ const newLine867 = () => ({
   id: ++lineId,
   category: "dividend",
   income: "",
-  withheld: "",
   rate: "",
 });
 
@@ -67,7 +66,8 @@ let docId = 0;
 const newDoc = (type = "106") => {
   const base = { id: ++docId, type };
   if (type === "106") return { ...base, employer: "", income: "", withheld: "" };
-  if (type === "867") return { ...base, description: "", lines: [newLine867()] };
+  // 867: withholding is reported for the whole form (not per line).
+  if (type === "867") return { ...base, description: "", withheld: "", lines: [newLine867()] };
   // "other": free-form income line.
   return { ...base, label: "", kind: "ordinary", income: "", withheld: "", rate: "" };
 };
@@ -108,6 +108,8 @@ function splitPersonDocs(cfg, person) {
   let passiveIncome = 0;
   let passiveWithheld = 0;
   const passiveSources = [];
+  // Withholding reported at the whole-867-form level (not per line).
+  let capFormWithheld = 0;
   const cap = {
     dividend: { sources: [] },
     interest: { sources: [] },
@@ -126,15 +128,15 @@ function splitPersonDocs(cfg, person) {
       exertionSources.push({ label: d.employer?.trim() || "טופס 106", income, withheld });
     } else if (d.type === "867") {
       const label = d.description?.trim() || "טופס 867";
+      capFormWithheld += num(d.withheld);
       for (const ln of d.lines || []) {
         const income = num(ln.income);
-        const withheld = num(ln.withheld);
         if (ln.category === "capitalgain") {
-          pushCap("capitalgain", label, income, cfg.capitalRates.capitalgain, withheld);
+          pushCap("capitalgain", label, income, cfg.capitalRates.capitalgain, 0);
         } else if (ln.category === "dividend" || ln.category === "interest") {
-          pushCap(ln.category, label, income, capitalRateFor(cfg, ln.category, ln.rate), withheld);
+          pushCap(ln.category, label, income, capitalRateFor(cfg, ln.category, ln.rate), 0);
         } else {
-          pushCap("otherfixed", label, income, capitalRateFor(cfg, "other", ln.rate), withheld);
+          pushCap("otherfixed", label, income, capitalRateFor(cfg, "other", ln.rate), 0);
         }
       }
     } else {
@@ -161,6 +163,7 @@ function splitPersonDocs(cfg, person) {
     passiveIncome,
     passiveWithheld,
     passiveSources,
+    capFormWithheld,
     cap,
   };
 }
@@ -256,12 +259,14 @@ function computeAll(cfg, persons, shared) {
   const capTax =
     dividend.tax + interest.tax + otherfixed.tax + capitalgain.tax + passive.tax;
   const poolTax = capTax + poolSurtax;
+  const capFormWithheld = parts.reduce((s, pt) => s + pt.capFormWithheld, 0);
   const jointWithheld =
     dividend.withheld +
     interest.withheld +
     otherfixed.withheld +
     capitalgain.withheld +
-    passive.withheld;
+    passive.withheld +
+    capFormWithheld;
   const jointBalance = jointWithheld - poolTax;
 
   const liability = taxpayers.reduce((s, t) => s + t.liability, 0) + poolTax;
@@ -576,6 +581,7 @@ export default function IncomeTaxCalculator() {
       {persons.map((p, i) => (
         <PersonCard
           key={p.id}
+          cfg={cfg}
           person={p}
           title={personName(p, i, mode)}
           showName={isCouple}
@@ -783,6 +789,7 @@ function BreakdownGroups({ groups, totals }) {
 // ----- one taxpayer: personal details + their documents -----
 
 function PersonCard({
+  cfg,
   person,
   title,
   showName,
@@ -878,6 +885,7 @@ function PersonCard({
           {person.docs.map((d, idx) => (
             <DocCard
               key={d.id}
+              cfg={cfg}
               doc={d}
               index={idx}
               onChange={(patch) => onDocChange(d.id, patch)}
@@ -916,7 +924,7 @@ function PersonCard({
 
 // ----- a single document card -----
 
-function DocCard({ doc, index, onChange, onRemove }) {
+function DocCard({ cfg, doc, index, onChange, onRemove }) {
   const title =
     doc.type === "106"
       ? "טופס 106 — משכורת"
@@ -929,6 +937,15 @@ function DocCard({ doc, index, onChange, onRemove }) {
     onChange({ lines: doc.lines.map((l) => (l.id === lid ? { ...l, ...patch } : l)) });
   const addLine = () => onChange({ lines: [...doc.lines, newLine867()] });
   const removeLine = (lid) => onChange({ lines: doc.lines.filter((l) => l.id !== lid) });
+
+  // Theoretical tax per line (income × rate), and the form total.
+  const lineRate = (ln) =>
+    ln.category === "capitalgain"
+      ? cfg.capitalRates.capitalgain
+      : capitalRateFor(cfg, ln.category === "other" ? "other" : ln.category, ln.rate);
+  const lineTax = (ln) => num(ln.income) * lineRate(ln);
+  const formComputed =
+    doc.type === "867" ? doc.lines.reduce((s, ln) => s + lineTax(ln), 0) : 0;
 
   return (
     <div className="rounded-xl border border-slate-100 bg-slate-50 p-4">
@@ -1020,7 +1037,16 @@ function DocCard({ doc, index, onChange, onRemove }) {
                       hint={isGain ? "סכום שלילי = הפסד הון" : undefined}
                       onChange={(v) => setLine(ln.id, { income: v })}
                     />
-                    {!isGain && (
+                    {isGain ? (
+                      <div>
+                        <span className="mb-1 block text-sm font-medium text-ink">
+                          שיעור מס
+                        </span>
+                        <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-center text-ink-soft">
+                          {(cfg.capitalRates.capitalgain * 100).toFixed(0)}%
+                        </div>
+                      </div>
+                    ) : (
                       <NumField
                         label="שיעור מס"
                         value={ln.rate}
@@ -1030,14 +1056,17 @@ function DocCard({ doc, index, onChange, onRemove }) {
                         onChange={(v) => setLine(ln.id, { rate: v })}
                       />
                     )}
-                    <NumField
-                      label="מס שנוכה במקור"
-                      value={ln.withheld}
-                      placeholder="0"
-                      suffix="₪"
-                      thousands
-                      onChange={(v) => setLine(ln.id, { withheld: v })}
-                    />
+                    <div>
+                      <span className="mb-1 block text-sm font-medium text-ink">
+                        מס מחושב לפי שיעור
+                      </span>
+                      <div
+                        dir="rtl"
+                        className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-right font-semibold text-ink"
+                      >
+                        {ILS.format(lineTax(ln))}
+                      </div>
+                    </div>
                   </div>
                 </div>
               );
@@ -1050,6 +1079,28 @@ function DocCard({ doc, index, onChange, onRemove }) {
           >
             + הוספת שורה
           </button>
+
+          {/* Whole-form summary: computed tax vs. tax withheld (input) */}
+          <div className="mt-3 flex flex-wrap items-end justify-between gap-4 border-t border-slate-200 pt-3">
+            <div>
+              <span className="block text-xs text-ink-soft">
+                מס מחושב לפי שיעור (סה״כ לטופס)
+              </span>
+              <span dir="rtl" className="text-lg font-extrabold text-brand-700">
+                {ILS.format(formComputed)}
+              </span>
+            </div>
+            <div className="min-w-[12rem]">
+              <NumField
+                label="מס שנוכה במקור (סה״כ לטופס)"
+                value={doc.withheld}
+                placeholder="0"
+                suffix="₪"
+                thousands
+                onChange={(v) => onChange({ withheld: v })}
+              />
+            </div>
+          </div>
         </>
       )}
 
