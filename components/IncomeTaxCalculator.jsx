@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import {
   DEFAULT_INCOME_TAX_CONFIG,
   useIncomeTaxConfig,
@@ -389,6 +389,181 @@ function buildGroups(res, mode, names) {
   return groups;
 }
 
+// ----- columnar (per-spouse) grouped breakdown for couple mode -----
+
+const dashCell = { v: "—", cls: "text-ink-soft" };
+const moneyCell = (x) => ({ v: ILS.format(x) });
+const minusCell = (x) => ({ v: ILSminus(x) });
+const balanceCell = (x) => ({
+  v: ILS.format(Math.abs(x)),
+  cls: `font-extrabold ${x >= 0 ? "text-brand-700" : "text-amber-700"}`,
+});
+
+// Builds collapsible groups whose rows carry per-column cells
+// [spouse-א׳, spouse-ב׳, חישוב משותף, סה״כ].
+function buildCoupleGroups(res, names) {
+  const [t0, t1] = res.taxpayers;
+  const p = res.pool;
+  const groups = [];
+
+  // Salary — per spouse.
+  const salaryRows = [
+    {
+      label: "הכנסה חייבת",
+      cells: [
+        moneyCell(t0.exertionIncome),
+        moneyCell(t1.exertionIncome),
+        dashCell,
+        moneyCell(t0.exertionIncome + t1.exertionIncome),
+      ],
+    },
+  ];
+  res.taxpayers.forEach((t, i) => {
+    t.sources
+      .filter((s) => Math.abs(s.income) > 0.5)
+      .forEach((src) => {
+        const cells = [dashCell, dashCell, dashCell, dashCell];
+        cells[i] = moneyCell(src.income);
+        salaryRows.push({ label: `  ${src.label}`, cells, muted: true });
+      });
+  });
+  salaryRows.push({
+    label: "מס לפי מדרגות (לפני זיכוי)",
+    muted: true,
+    cells: [moneyCell(t0.bracketTax), moneyCell(t1.bracketTax), dashCell, dashCell],
+  });
+  salaryRows.push({
+    label: "זיכוי נקודות זיכוי",
+    muted: true,
+    cells: [minusCell(t0.creditUsed), minusCell(t1.creditUsed), dashCell, dashCell],
+  });
+  groups.push({
+    key: "salary",
+    title: "הכנסה מיגיעה אישית",
+    headerCells: [
+      moneyCell(t0.afterCredit),
+      moneyCell(t1.afterCredit),
+      dashCell,
+      moneyCell(t0.afterCredit + t1.afterCredit),
+    ],
+    rows: salaryRows,
+  });
+
+  // Flat-rate capital categories — pooled into the joint column.
+  const flat = (cat, title, key) => {
+    if (cat.income <= 0.5) return;
+    const rows = cat.sources
+      .filter((s) => Math.abs(s.income) > 0.5)
+      .map((s) => ({
+        label: `  ${s.label} (${(s.rate * 100).toFixed(0)}%)`,
+        cells: [dashCell, dashCell, moneyCell(s.income), moneyCell(s.income)],
+        muted: true,
+      }));
+    groups.push({
+      key,
+      title,
+      headerCells: [dashCell, dashCell, moneyCell(cat.tax), moneyCell(cat.tax)],
+      rows,
+    });
+  };
+  flat(p.dividend, "דיבידנד", "dividend");
+  flat(p.interest, "ריבית", "interest");
+
+  // Capital gains — joint column, with loss offset + carry-forward.
+  const cg = p.capitalgain;
+  if (Math.abs(cg.gross) > 0.5 || cg.carryforward > 0.5) {
+    const rows = cg.sources
+      .filter((s) => Math.abs(s.income) > 0.5)
+      .map((s) => ({
+        label: `  ${s.label} — ${s.income >= 0 ? "רווח" : "הפסד"}`,
+        cells: [dashCell, dashCell, moneyCell(s.income), dashCell],
+        muted: true,
+      }));
+    if (cg.carryforward > 0.5)
+      rows.push({
+        label: "  הפסדים מועברים משנים קודמות",
+        cells: [dashCell, dashCell, minusCell(cg.carryforward), dashCell],
+        muted: true,
+      });
+    rows.push({
+      label: "  רווח הון חייב (אחרי קיזוז)",
+      cells: [dashCell, dashCell, moneyCell(cg.taxable), moneyCell(cg.taxable)],
+    });
+    if (cg.lossNext > 0.5)
+      rows.push({
+        label: "  הפסד הון מועבר לשנה הבאה",
+        cells: [dashCell, dashCell, moneyCell(cg.lossNext), dashCell],
+        muted: true,
+      });
+    groups.push({
+      key: "capitalgain",
+      title: `רווח הון (${(cg.rate * 100).toFixed(0)}%)`,
+      headerCells: [dashCell, dashCell, moneyCell(cg.tax), moneyCell(cg.tax)],
+      rows,
+    });
+  }
+
+  flat(p.otherfixed, "הכנסה אחרת (שיעור קבוע)", "otherfixed");
+
+  // Non-exertion marginal income — joint column.
+  const pas = p.passive;
+  if (pas.income > 0.5) {
+    const rows = pas.sources
+      .filter((s) => Math.abs(s.income) > 0.5)
+      .map((s) => ({
+        label: `  ${s.label}`,
+        cells: [dashCell, dashCell, moneyCell(s.income), moneyCell(s.income)],
+        muted: true,
+      }));
+    groups.push({
+      key: "passive",
+      title: `הכנסה שאינה מיגיעה אישית (${(pas.rate * 100).toFixed(0)}%)`,
+      headerCells: [dashCell, dashCell, moneyCell(pas.tax), moneyCell(pas.tax)],
+      rows,
+    });
+  }
+
+  // Surtax.
+  const totalSurtax = t0.surtax + t1.surtax + res.poolSurtax;
+  if (totalSurtax > 0.5) {
+    groups.push({
+      key: "surtax",
+      title: "מס יסף",
+      headerCells: [
+        t0.surtax > 0.5 ? moneyCell(t0.surtax) : dashCell,
+        t1.surtax > 0.5 ? moneyCell(t1.surtax) : dashCell,
+        res.poolSurtax > 0.5 ? moneyCell(res.poolSurtax) : dashCell,
+        moneyCell(totalSurtax),
+      ],
+      rows: [],
+    });
+  }
+
+  const totals = {
+    liabilityCells: [
+      moneyCell(t0.liability),
+      moneyCell(t1.liability),
+      moneyCell(res.poolTax),
+      moneyCell(res.household.liability),
+    ],
+    withheldCells: [
+      minusCell(t0.withheld),
+      minusCell(t1.withheld),
+      minusCell(res.jointWithheld),
+      minusCell(res.household.withheld),
+    ],
+    balanceCells: [
+      balanceCell(t0.balance),
+      balanceCell(t1.balance),
+      balanceCell(res.jointBalance),
+      balanceCell(res.household.balance),
+    ],
+    lossNext: cg.lossNext,
+  };
+
+  return { groups, totals };
+}
+
 // ----- shared field components -----
 
 function NumField({ label, value, onChange, placeholder, suffix, thousands, asText, signed, hint }) {
@@ -528,7 +703,8 @@ export default function IncomeTaxCalculator() {
   const household = calc.household;
   const isRefund = household.balance >= 0;
   const names = persons.map((p, i) => personName(p, i, mode));
-  const groups = buildGroups(calc, mode, names);
+  const groups = isCouple ? null : buildGroups(calc, mode, names);
+  const coupleData = isCouple ? buildCoupleGroups(calc, names) : null;
   const totals = {
     liability: household.liability,
     withheld: household.withheld,
@@ -666,7 +842,16 @@ export default function IncomeTaxCalculator() {
             <span>פירוט חישוב המס (לפי סוגי הכנסה)</span>
             <span className="text-ink-soft">{showDetail ? "−" : "+"}</span>
           </button>
-          {showDetail && <BreakdownGroups groups={groups} totals={totals} />}
+          {showDetail &&
+            (isCouple ? (
+              <CoupleBreakdownGrouped
+                names={names}
+                groups={coupleData.groups}
+                totals={coupleData.totals}
+              />
+            ) : (
+              <BreakdownGroups groups={groups} totals={totals} />
+            ))}
         </div>
 
         {/* Editable assumptions */}
@@ -782,6 +967,104 @@ function BreakdownGroups({ groups, totals }) {
           />
         )}
       </dl>
+    </div>
+  );
+}
+
+// Couple: collapsible groups by income type, each opening to per-spouse columns.
+function CoupleBreakdownGrouped({ names, groups, totals }) {
+  const [open, setOpen] = useState(() => new Set());
+  const toggle = (k) =>
+    setOpen((o) => {
+      const n = new Set(o);
+      n.has(k) ? n.delete(k) : n.add(k);
+      return n;
+    });
+  const cell = (c, i, strong) => (
+    <td
+      key={i}
+      dir="rtl"
+      className={`whitespace-nowrap px-3 py-2 text-center ${
+        c.cls || (strong ? "font-extrabold text-brand-700" : "font-medium text-ink")
+      }`}
+    >
+      {c.v}
+    </td>
+  );
+
+  return (
+    <div className="overflow-x-auto border-t border-slate-100">
+      <table dir="rtl" className="w-full min-w-[620px] text-sm">
+        <thead>
+          <tr className="border-b border-slate-200 bg-slate-50">
+            <th className="px-3 py-2 text-right font-semibold text-ink">סעיף</th>
+            <th className="px-3 py-2 text-center font-semibold text-ink">{names[0]}</th>
+            <th className="px-3 py-2 text-center font-semibold text-ink">{names[1]}</th>
+            <th className="px-3 py-2 text-center font-semibold text-ink">חישוב משותף</th>
+            <th className="px-3 py-2 text-center font-semibold text-ink">סה״כ</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100">
+          {groups.map((g) => (
+            <Fragment key={g.key}>
+              <tr
+                className="cursor-pointer bg-white hover:bg-slate-50"
+                onClick={() => toggle(g.key)}
+              >
+                <td className="whitespace-nowrap px-3 py-2.5 text-right font-bold text-ink">
+                  <span className="ml-1 inline-block w-3 text-ink-soft">
+                    {open.has(g.key) ? "−" : "+"}
+                  </span>
+                  {g.title}
+                </td>
+                {g.headerCells.map((c, i) => cell(c, i, true))}
+              </tr>
+              {open.has(g.key) &&
+                g.rows.map((r, i) => (
+                  <tr key={i} className="bg-slate-50">
+                    <td
+                      className={`whitespace-nowrap px-3 py-1.5 text-right ${
+                        r.muted ? "text-ink-soft" : "text-ink"
+                      }`}
+                    >
+                      {r.label}
+                    </td>
+                    {r.cells.map((c, j) => cell(c, j, false))}
+                  </tr>
+                ))}
+            </Fragment>
+          ))}
+
+          <tr className="border-t-2 border-slate-200 bg-slate-50">
+            <td className="px-3 py-2.5 text-right font-bold text-ink">סה״כ חבות מס</td>
+            {totals.liabilityCells.map((c, i) => cell(c, i, true))}
+          </tr>
+          <tr>
+            <td className="px-3 py-2 text-right text-ink">מס שנוכה במקור</td>
+            {totals.withheldCells.map((c, i) => cell(c, i, false))}
+          </tr>
+          <tr className="bg-slate-50">
+            <td className="px-3 py-2.5 text-right font-bold text-ink">
+              החזר (+) / לתשלום (−)
+            </td>
+            {totals.balanceCells.map((c, i) => cell(c, i, false))}
+          </tr>
+          {totals.lossNext > 0.5 && (
+            <tr>
+              <td className="px-3 py-2 text-right text-ink-soft">
+                הפסד הון מועבר לשנה הבאה
+              </td>
+              {[dashCell, dashCell, moneyCell(totals.lossNext), moneyCell(totals.lossNext)].map(
+                (c, i) => cell(c, i, false)
+              )}
+            </tr>
+          )}
+        </tbody>
+      </table>
+      <p className="px-3 py-3 text-xs text-ink-soft">
+        הכנסה שאינה מיגיעה אישית (הון) מרוכזת בעמודת "חישוב משותף". לחצו על כל סוג
+        הכנסה לפתיחת הפירוט.
+      </p>
     </div>
   );
 }
