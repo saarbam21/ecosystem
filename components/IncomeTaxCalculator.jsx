@@ -48,13 +48,14 @@ const OTHER_KINDS = [
 // ----- documents & taxpayers -----
 
 let lineId = 0;
-const newLine867 = () => ({ id: ++lineId, category: "dividend", income: "", rate: "" });
+// Withholding is reported per income line on the 867.
+const newLine867 = () => ({ id: ++lineId, category: "dividend", income: "", rate: "", withheld: "" });
 
 let docId = 0;
 const newDoc = (type = "106") => {
   const base = { id: ++docId, type };
   if (type === "106") return { ...base, employer: "", income: "", withheld: "" };
-  if (type === "867") return { ...base, description: "", withheld: "", lines: [newLine867()] };
+  if (type === "867") return { ...base, description: "", lines: [newLine867()] };
   return { ...base, label: "", kind: "ordinary", income: "", withheld: "", rate: "" };
 };
 
@@ -108,7 +109,7 @@ function splitPersonDocs(cfg, person) {
       exertionSources.push({ label: d.employer?.trim() || "טופס 106", income });
     } else if (d.type === "867") {
       const label = d.description?.trim() || "טופס 867";
-      const lns = (d.lines || []).map((ln) => {
+      for (const ln of d.lines || []) {
         const income = num(ln.income);
         const catKey =
           ln.category === "dividend" || ln.category === "interest"
@@ -120,15 +121,9 @@ function splitPersonDocs(cfg, person) {
           ln.category === "capitalgain"
             ? cfg.capitalRates.capitalgain
             : capitalRateFor(cfg, ln.category === "other" ? "other" : ln.category, ln.rate);
-        return { catKey, income, rate, tax: income * rate };
-      });
-      const sumPos = lns.reduce((s, l) => s + Math.max(0, l.tax), 0);
-      const formW = num(d.withheld);
-      lns.forEach((l) => {
-        cap[l.catKey].sources.push({ label, income: l.income, rate: l.rate });
-        const share = sumPos > 0 ? Math.max(0, l.tax) / sumPos : 1 / Math.max(1, lns.length);
-        cap[l.catKey].withheld += formW * share;
-      });
+        cap[catKey].sources.push({ label, income, rate });
+        cap[catKey].withheld += num(ln.withheld);
+      }
     } else {
       const income = num(d.income);
       const w = num(d.withheld);
@@ -283,12 +278,6 @@ function buildTable(res, mode, names) {
   const p = res.pool;
   const groups = [];
 
-  const colAt = (i, cellObj) => {
-    if (!couple) return [cellObj];
-    const c = [dashCell, dashCell, dashCell];
-    c[i] = cellObj;
-    return c;
-  };
   const jointCol = (cellObj) => (couple ? [dashCell, dashCell, cellObj] : [cellObj]);
   const detail = (label, taxCells, muted = true) => ({
     label: `  ${label}`,
@@ -296,20 +285,38 @@ function buildTable(res, mode, names) {
     muted,
   });
 
-  // Salary — per taxpayer.
+  // Salary — each line item on ONE row, with the spouses side by side.
   {
+    const T = res.taxpayers;
+    const pair = (label, getCell, muted = true) => {
+      const taxCells = couple ? [getCell(0), getCell(1), dashCell] : [getCell(0)];
+      return { label: `  ${label}`, cells: [...taxCells, dashCell, dashCell], muted };
+    };
     const rows = [];
-    res.taxpayers.forEach((t, i) => {
-      t.exertionSources
-        .filter((s) => Math.abs(s.income) > 0.5)
-        .forEach((src) => rows.push(detail(src.label, colAt(i, moneyCell(src.income)))));
-      rows.push(detail("מס לפי מדרגות (לפני זיכוי)", colAt(i, moneyCell(t.bracketTax))));
-      rows.push(detail("זיכוי נקודות זיכוי", colAt(i, minusCell(t.creditUsed))));
-      if (t.exertionSurtax > 0.5)
-        rows.push(detail("תוספת מס יסף (יגיעה אישית)", colAt(i, moneyCell(t.exertionSurtax))));
-    });
-    const withheld = res.taxpayers.reduce((s, t) => s + t.withheld, 0);
-    const tax = res.taxpayers.reduce((s, t) => s + t.tax, 0);
+    const maxSrc = Math.max(0, ...T.map((t) => t.exertionSources.length));
+    for (let s = 0; s < maxSrc; s++) {
+      const labels = [...new Set(T.map((t) => t.exertionSources[s]?.label).filter(Boolean))];
+      rows.push(
+        pair(labels.join(" / ") || "טופס 106", (k) => {
+          const src = T[k]?.exertionSources[s];
+          return src ? moneyCell(src.income) : dashCell;
+        })
+      );
+    }
+    if (maxSrc > 1)
+      rows.push(pair("הכנסה חייבת (סה״כ)", (k) => (T[k] ? moneyCell(T[k].exertionIncome) : dashCell)));
+    rows.push(pair("מס לפי מדרגות (לפני זיכוי)", (k) => (T[k] ? moneyCell(T[k].bracketTax) : dashCell)));
+    rows.push(pair("זיכוי נקודות זיכוי", (k) => (T[k] ? minusCell(T[k].creditUsed) : dashCell)));
+    if (T.some((t) => t.exertionSurtax > 0.5))
+      rows.push(
+        pair("תוספת מס יסף", (k) =>
+          T[k] && T[k].exertionSurtax > 0.5 ? moneyCell(T[k].exertionSurtax) : dashCell
+        )
+      );
+    rows.push(pair("מס שנוכה במקור", (k) => (T[k] ? moneyCell(T[k].withheld) : dashCell)));
+
+    const withheld = T.reduce((s, t) => s + t.withheld, 0);
+    const tax = T.reduce((s, t) => s + t.tax, 0);
     const taxCells = couple ? [moneyCell(t0.tax), moneyCell(t1.tax), dashCell] : [moneyCell(tax)];
     groups.push({
       key: "salary",
@@ -320,7 +327,8 @@ function buildTable(res, mode, names) {
   }
 
   const flat = (cat, title, key) => {
-    if (cat.income <= 0.5 && cat.tax <= 0.5) return;
+    // Show the group whenever it has any amount — including a negative (loss).
+    if (Math.abs(cat.income) <= 0.5 && Math.abs(cat.tax) <= 0.5) return;
     const rows = cat.sources
       .filter((s) => Math.abs(s.income) > 0.5)
       .map((s) => detail(`${s.label} (${(s.rate * 100).toFixed(0)}%)`, jointCol(moneyCell(s.income))));
@@ -361,7 +369,7 @@ function buildTable(res, mode, names) {
   flat(p.otherfixed, "הכנסה אחרת (שיעור קבוע)", "otherfixed");
 
   const pas = p.passive;
-  if (pas.income > 0.5) {
+  if (Math.abs(pas.income) > 0.5) {
     const rows = pas.sources
       .filter((s) => Math.abs(s.income) > 0.5)
       .map((s) => detail(s.label, jointCol(moneyCell(s.income))));
@@ -869,6 +877,8 @@ function DocCard({ doc, index, onChange, onRemove }) {
     return num(ln.income) * rate;
   };
   const formComputed = doc.type === "867" ? doc.lines.reduce((s, ln) => s + lineTax(ln), 0) : 0;
+  const formWithheld =
+    doc.type === "867" ? doc.lines.reduce((s, ln) => s + num(ln.withheld), 0) : 0;
 
   return (
     <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
@@ -925,7 +935,7 @@ function DocCard({ doc, index, onChange, onRemove }) {
                     value={ln.category}
                     onChange={(v) => setLine(ln.id, { category: v })}
                     options={CAPITAL_CATEGORIES}
-                    className="w-36"
+                    className="w-32"
                   />
                   <MiniNum
                     value={ln.income}
@@ -933,10 +943,10 @@ function DocCard({ doc, index, onChange, onRemove }) {
                     thousands
                     signed={isGain}
                     onChange={(v) => setLine(ln.id, { income: v })}
-                    className="w-32"
+                    className="w-28"
                   />
                   {isGain ? (
-                    <span className="w-14 text-center text-sm text-ink-soft">
+                    <span className="w-12 text-center text-sm text-ink-soft">
                       {(GAINS_RATE * 100).toFixed(0)}%
                     </span>
                   ) : (
@@ -944,10 +954,17 @@ function DocCard({ doc, index, onChange, onRemove }) {
                       value={ln.rate}
                       placeholder="25%"
                       onChange={(v) => setLine(ln.id, { rate: v })}
-                      className="w-14"
+                      className="w-12"
                     />
                   )}
-                  <span className="min-w-[6rem] flex-1 text-left text-sm text-ink-soft">
+                  <MiniNum
+                    value={ln.withheld}
+                    placeholder="נוכה ₪"
+                    thousands
+                    onChange={(v) => setLine(ln.id, { withheld: v })}
+                    className="w-28"
+                  />
+                  <span className="min-w-[5.5rem] flex-1 text-left text-sm text-ink-soft">
                     מס: <span className="font-semibold text-ink">{ILS.format(lineTax(ln))}</span>
                   </span>
                   {doc.lines.length > 1 && (
@@ -971,20 +988,15 @@ function DocCard({ doc, index, onChange, onRemove }) {
           >
             + הוספת סוג הכנסה
           </button>
-          <div className="mt-2 flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 pt-2 text-sm">
-            <span>
-              מס מחושב לפי שיעור: <span className="font-bold text-brand-700">{ILS.format(formComputed)}</span>
+          <div className="mt-2 flex flex-wrap items-center gap-5 border-t border-slate-200 pt-2 text-sm">
+            <span className="text-ink-soft">
+              סה״כ מס מחושב:{" "}
+              <span className="font-bold text-brand-700">{ILS.format(formComputed)}</span>
             </span>
-            <label className="flex items-center gap-2 text-ink-soft">
-              מס שנוכה במקור (לטופס):
-              <MiniNum
-                value={doc.withheld}
-                placeholder="0 ₪"
-                thousands
-                onChange={(v) => onChange({ withheld: v })}
-                className="w-32"
-              />
-            </label>
+            <span className="text-ink-soft">
+              סה״כ נוכה במקור:{" "}
+              <span className="font-bold text-ink">{ILS.format(formWithheld)}</span>
+            </span>
           </div>
         </>
       )}
@@ -1005,10 +1017,11 @@ function DocCard({ doc, index, onChange, onRemove }) {
           />
           <MiniNum
             value={doc.income}
-            placeholder="סכום ₪"
+            placeholder="סכום ₪ (שלילי=הפסד)"
             thousands
+            signed
             onChange={(v) => onChange({ income: v })}
-            className="w-32"
+            className="w-40"
           />
           <MiniNum
             value={doc.withheld}
