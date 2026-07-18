@@ -954,13 +954,34 @@ function SummaryTable({ data }) {
 
 // ----- one taxpayer -----
 
-// Hidden helper: build up a person's credit points from common entitlements.
+// Hidden helper: build up a person's credit points. Child points differ between
+// mother (אם) and father (אב) — the value shown follows the selected gender.
+const KOLZCHUT_URL =
+  "https://www.kolzchut.org.il/he/%D7%A0%D7%A7%D7%95%D7%93%D7%95%D7%AA_%D7%96%D7%99%D7%9B%D7%95%D7%99_%D7%9E%D7%9E%D7%A1_%D7%94%D7%9B%D7%A0%D7%A1%D7%94_%D7%9C%D7%94%D7%95%D7%A8%D7%94_%D7%9C%D7%99%D7%9C%D7%93_%D7%A2%D7%93_%D7%92%D7%99%D7%9C_18";
+
+// Child credit-point bands: { mother, father } points per child.
+const CHILD_BANDS = [
+  { key: "birth", label: "ילדים שנולדו השנה (שנת הלידה)", mother: 1.5, father: 1.5 },
+  { key: "c1_5", label: "ילדים בגיל 1–5", mother: 2.5, father: 2.5 },
+  { key: "c6_17", label: "ילדים בגיל 6–17", mother: 2, father: 1 },
+  { key: "c18", label: "ילדים בגיל 18", mother: 0.5, father: 0 },
+];
+const OTHER_CREDITS = [
+  { key: "single", label: "הורה במשפחה חד-הורית", pts: 1 },
+  { key: "immigrant", label: "עולה חדש (שנה ראשונה)", pts: 1 },
+  { key: "soldier", label: "חייל/ת משוחרר/ת (שנה)", pts: 1 },
+  { key: "degree", label: "תואר אקדמי (שנה לאחר סיום)", pts: 1 },
+];
+
 function CreditPointsCalc({ gender, onApply }) {
+  const isMother = gender === "female";
+  const base = isMother ? 2.75 : 2.25; // resident 2.25 + woman 0.5
+  const childPts = (b) => (isMother ? b.mother : b.father);
+
   const [v, setV] = useState({
-    resident: true,
-    woman: gender === "female",
-    c05: "",
-    c617: "",
+    birth: "",
+    c1_5: "",
+    c6_17: "",
     c18: "",
     single: false,
     immigrant: false,
@@ -969,54 +990,64 @@ function CreditPointsCalc({ gender, onApply }) {
   });
   const set = (patch) => setV((s) => ({ ...s, ...patch }));
 
-  const items = [
-    { key: "resident", label: "תושב/ת ישראל", pts: 2.25, type: "check" },
-    { key: "woman", label: "אישה", pts: 0.5, type: "check" },
-    { key: "c05", label: "ילדים בגיל לידה–5", pts: 2.5, type: "count" },
-    { key: "c18", label: "ילדים בגיל 18", pts: 0.5, type: "count" },
-    { key: "c617", label: "ילדים בגיל 6–17", pts: 1, type: "count" },
-    { key: "single", label: "הורה במשפחה חד-הורית", pts: 1, type: "check" },
-    { key: "immigrant", label: "עולה חדש (שנה ראשונה)", pts: 1, type: "check" },
-    { key: "soldier", label: "חייל/ת משוחרר/ת (שנה)", pts: 1, type: "check" },
-    { key: "degree", label: "תואר אקדמי (שנה לאחר סיום)", pts: 1, type: "check" },
-  ];
-
-  const total = items.reduce((s, it) => {
-    if (it.type === "check") return s + (v[it.key] ? it.pts : 0);
-    return s + num(v[it.key]) * it.pts;
-  }, 0);
+  const total =
+    base +
+    CHILD_BANDS.reduce((s, b) => s + num(v[b.key]) * childPts(b), 0) +
+    OTHER_CREDITS.reduce((s, o) => s + (v[o.key] ? o.pts : 0), 0);
 
   return (
     <div className="mb-4 rounded-xl border border-brand-100 bg-brand-50/60 p-4">
-      <p className="mb-3 text-sm font-semibold text-ink">מחשבון נקודות זיכוי</p>
+      <div className="mb-3 flex items-center justify-between">
+        <p className="text-sm font-semibold text-ink">מחשבון נקודות זיכוי</p>
+        <span className="text-xs font-medium text-brand-700">
+          לפי טבלת {isMother ? "אם" : "אב"}
+        </span>
+      </div>
+
+      <p className="mb-3 rounded-lg bg-white px-3 py-2 text-sm text-ink">
+        נקודות בסיס (תושב/ת ישראל{isMother ? " + אישה" : ""}):{" "}
+        <span className="font-bold text-brand-700">{base}</span>
+      </p>
+
+      <p className="mb-1 text-xs font-semibold text-ink-soft">ילדים (לפי גיל בשנת המס)</p>
       <div className="grid gap-x-6 gap-y-2 sm:grid-cols-2">
-        {items.map((it) => (
-          <label key={it.key} className="flex items-center justify-between gap-2 text-sm text-ink">
+        {CHILD_BANDS.map((b) => (
+          <label key={b.key} className="flex items-center justify-between gap-2 text-sm text-ink">
             <span className="flex items-center gap-2">
-              {it.type === "check" ? (
-                <input
-                  type="checkbox"
-                  checked={v[it.key]}
-                  onChange={(e) => set({ [it.key]: e.target.checked })}
-                  className="h-4 w-4 accent-brand-600"
-                />
-              ) : (
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  dir="ltr"
-                  value={v[it.key]}
-                  placeholder="0"
-                  onChange={(e) => set({ [it.key]: e.target.value.replace(/[^\d]/g, "") })}
-                  className="w-12 rounded-lg border border-slate-200 px-2 py-1 text-center text-sm outline-none focus:border-brand-500"
-                />
-              )}
-              {it.label}
+              <input
+                type="text"
+                inputMode="numeric"
+                dir="ltr"
+                value={v[b.key]}
+                placeholder="0"
+                onChange={(e) => set({ [b.key]: e.target.value.replace(/[^\d]/g, "") })}
+                className="w-12 rounded-lg border border-slate-200 px-2 py-1 text-center text-sm outline-none focus:border-brand-500"
+              />
+              {b.label}
             </span>
-            <span className="text-xs text-ink-soft">{it.pts} נק׳</span>
+            <span className="text-xs text-ink-soft">{childPts(b)} נק׳ לילד</span>
           </label>
         ))}
       </div>
+
+      <p className="mb-1 mt-3 text-xs font-semibold text-ink-soft">זכאויות נוספות</p>
+      <div className="grid gap-x-6 gap-y-2 sm:grid-cols-2">
+        {OTHER_CREDITS.map((o) => (
+          <label key={o.key} className="flex items-center justify-between gap-2 text-sm text-ink">
+            <span className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={v[o.key]}
+                onChange={(e) => set({ [o.key]: e.target.checked })}
+                className="h-4 w-4 accent-brand-600"
+              />
+              {o.label}
+            </span>
+            <span className="text-xs text-ink-soft">{o.pts} נק׳</span>
+          </label>
+        ))}
+      </div>
+
       <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-brand-100 pt-3">
         <span className="text-sm text-ink">
           סה״כ: <span className="font-extrabold text-brand-700">{total.toFixed(2)}</span> נק׳
@@ -1030,7 +1061,16 @@ function CreditPointsCalc({ gender, onApply }) {
         </button>
       </div>
       <p className="mt-2 text-xs text-ink-soft">
-        אומדן על בסיס הזכאויות הנפוצות — נקודות עולה/חייל/תואר משתנות לפי ותק. מומלץ לאמת מול תלוש/פקיד שומה.
+        נקודות הילדים שונות בין אם לאב ונקבעות לפי המין שנבחר. ערכים לפי{" "}
+        <a
+          href={KOLZCHUT_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="font-medium text-brand-700 underline"
+        >
+          כל-זכות
+        </a>{" "}
+        — ייתכנו עדכוני הוראת-שעה; נקודות עולה/חייל/תואר משתנות לפי ותק. מומלץ לאמת.
       </p>
     </div>
   );
