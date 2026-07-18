@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import {
   DEFAULT_INCOME_TAX_CONFIG,
   useIncomeTaxConfig,
@@ -75,6 +75,35 @@ const newPerson = (gender = "male") => ({
 const COUPLE_LABELS = ["בן/בת זוג א׳", "בן/בת זוג ב׳"];
 const personName = (person, index, mode) =>
   person.name?.trim() || (mode === "couple" ? COUPLE_LABELS[index] : "הנישום");
+
+// ----- persistence -----
+
+const STORAGE_KEY = "ecosystem_income_tax_form_v1";
+const FORM_VERSION = 1;
+
+const defaultShared = () => ({
+  pointValue: String(DEFAULT_INCOME_TAX_CONFIG.pointValueAnnual),
+  surtaxRate: String(DEFAULT_INCOME_TAX_CONFIG.surtaxRate * 100),
+  surtaxThreshold: String(DEFAULT_INCOME_TAX_CONFIG.surtaxThreshold),
+});
+
+// After loading saved data, advance the id counters past any restored ids so
+// newly-added items never collide with loaded ones.
+function reseedIds(persons) {
+  let mp = personId;
+  let md = docId;
+  let ml = lineId;
+  (persons || []).forEach((p) => {
+    mp = Math.max(mp, p.id || 0);
+    (p.docs || []).forEach((d) => {
+      md = Math.max(md, d.id || 0);
+      (d.lines || []).forEach((l) => (ml = Math.max(ml, l.id || 0)));
+    });
+  });
+  personId = mp;
+  docId = md;
+  lineId = ml;
+}
 
 // ----- calculation -----
 
@@ -483,17 +512,86 @@ export default function IncomeTaxCalculator() {
   const [mode, setMode] = useState("single");
   const [persons, setPersons] = useState([newPerson("male")]);
   const [lossCarryforward, setLossCarryforward] = useState("");
-
-  const [shared, setShared] = useState({
-    pointValue: String(DEFAULT_INCOME_TAX_CONFIG.pointValueAnnual),
-    surtaxRate: String(DEFAULT_INCOME_TAX_CONFIG.surtaxRate * 100),
-    surtaxThreshold: String(DEFAULT_INCOME_TAX_CONFIG.surtaxThreshold),
-  });
+  const [shared, setShared] = useState(defaultShared);
+  const [title, setTitle] = useState("");
 
   const [showDetail, setShowDetail] = useState(true);
   const [showAssumptions, setShowAssumptions] = useState(false);
+  const [hydrated, setHydrated] = useState(false);
+  const [savedAt, setSavedAt] = useState(null);
 
   const isCouple = mode === "couple";
+
+  // Apply a saved/imported snapshot to the form state.
+  const applyState = (d) => {
+    if (!d || typeof d !== "object" || !Array.isArray(d.persons) || d.persons.length === 0)
+      return false;
+    reseedIds(d.persons);
+    setPersons(d.persons);
+    setMode(d.mode === "couple" && d.persons.length === 2 ? "couple" : "single");
+    setTitle(typeof d.title === "string" ? d.title : "");
+    setLossCarryforward(d.lossCarryforward != null ? String(d.lossCarryforward) : "");
+    setShared({ ...defaultShared(), ...(d.shared && typeof d.shared === "object" ? d.shared : {}) });
+    return true;
+  };
+
+  // Restore the auto-saved form once, after mount (avoids hydration mismatch).
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(STORAGE_KEY);
+      if (raw) applyState(JSON.parse(raw));
+    } catch {}
+    setHydrated(true);
+  }, []);
+
+  // Auto-save on every change (after the initial restore).
+  useEffect(() => {
+    if (!hydrated) return;
+    try {
+      window.localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({ version: FORM_VERSION, title, mode, persons, shared, lossCarryforward })
+      );
+      setSavedAt(Date.now());
+    } catch {}
+  }, [hydrated, title, mode, persons, shared, lossCarryforward]);
+
+  const exportFile = () => {
+    const data = { version: FORM_VERSION, title, mode, persons, shared, lossCarryforward };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const base = (title.trim() || "מחשבון-מס").replace(/[^\p{L}\p{N}_-]+/gu, "_");
+    a.href = url;
+    a.download = `${base}-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const importFile = (file) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        if (!applyState(JSON.parse(reader.result))) window.alert("הקובץ אינו טופס תקין.");
+      } catch {
+        window.alert("לא ניתן לקרוא את הקובץ.");
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const resetForm = () => {
+    if (!window.confirm("לאפס את הטופס? כל הנתונים שהוזנו יימחקו.")) return;
+    try {
+      window.localStorage.removeItem(STORAGE_KEY);
+    } catch {}
+    setTitle("");
+    setMode("single");
+    setPersons([newPerson("male")]);
+    setLossCarryforward("");
+    setShared(defaultShared());
+  };
 
   const switchMode = (m) => {
     setMode(m);
@@ -546,6 +644,59 @@ export default function IncomeTaxCalculator() {
 
   return (
     <div className="space-y-6">
+      {/* Save / load toolbar */}
+      <div className="card">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="min-w-[12rem] flex-1">
+            <MiniText
+              value={title}
+              placeholder="שם הלקוח / כותרת הטופס (לא חובה)"
+              onChange={setTitle}
+              className="w-full font-semibold"
+            />
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={exportFile}
+              className="rounded-full border border-brand-300 bg-white px-4 py-1.5 text-sm font-semibold text-brand-700 transition hover:bg-brand-50"
+            >
+              שמירה לקובץ
+            </button>
+            <label className="cursor-pointer rounded-full border border-brand-300 bg-white px-4 py-1.5 text-sm font-semibold text-brand-700 transition hover:bg-brand-50">
+              טעינה מקובץ
+              <input
+                type="file"
+                accept="application/json,.json"
+                className="hidden"
+                onChange={(e) => {
+                  importFile(e.target.files?.[0]);
+                  e.target.value = "";
+                }}
+              />
+            </label>
+            <button
+              type="button"
+              onClick={resetForm}
+              className="rounded-full border border-slate-200 bg-white px-4 py-1.5 text-sm font-semibold text-ink-soft transition hover:border-red-300 hover:text-red-600"
+            >
+              איפוס
+            </button>
+          </div>
+        </div>
+        <p className="mt-2 text-xs text-ink-soft">
+          הטופס נשמר אוטומטית בדפדפן זה — ניתן לחזור ולעדכן בהמשך.
+          {savedAt && (
+            <span>
+              {" "}
+              נשמר לאחרונה{" "}
+              {new Date(savedAt).toLocaleTimeString("he-IL", { hour: "2-digit", minute: "2-digit" })}.
+            </span>
+          )}{" "}
+          לשמירה לטווח ארוך או למעבר בין מכשירים — שמרו לקובץ.
+        </p>
+      </div>
+
       {/* Mode */}
       <div className="card">
         <span className="mb-1 block font-medium text-ink">אופן החישוב</span>
