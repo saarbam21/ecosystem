@@ -54,7 +54,7 @@ const newLine867 = () => ({ id: ++lineId, category: "dividend", income: "", rate
 let docId = 0;
 const newDoc = (type = "106") => {
   const base = { id: ++docId, type };
-  if (type === "106") return { ...base, employer: "", income: "", withheld: "" };
+  if (type === "106") return { ...base, employer: "", income: "", pension: "", withheld: "" };
   if (type === "867") return { ...base, description: "", lines: [newLine867()] };
   return { ...base, label: "", kind: "ordinary", income: "", withheld: "", rate: "" };
 };
@@ -118,6 +118,7 @@ function capitalRateFor(cfg, category, rate) {
 // proportion to each line's (positive) computed tax.
 function splitPersonDocs(cfg, person) {
   let exertionIncome = 0;
+  let pensionDeduction = 0;
   let exertionWithheld = 0;
   const exertionSources = [];
   let passiveIncome = 0;
@@ -132,10 +133,11 @@ function splitPersonDocs(cfg, person) {
 
   for (const d of person.docs) {
     if (d.type === "106") {
-      const income = num(d.income);
-      exertionIncome += income;
+      const salary = num(d.income);
+      pensionDeduction += num(d.pension);
+      exertionIncome += salary;
       exertionWithheld += num(d.withheld);
-      exertionSources.push({ label: d.employer?.trim() || "טופס 106", income });
+      exertionSources.push({ label: d.employer?.trim() || "טופס 106", income: salary });
     } else if (d.type === "867") {
       const label = d.description?.trim() || "טופס 867";
       for (const ln of d.lines || []) {
@@ -172,7 +174,10 @@ function splitPersonDocs(cfg, person) {
     }
   }
   return {
-    exertionIncome,
+    // Taxable personal-exertion income = salary − pension-fund deduction.
+    exertionIncome: exertionIncome - pensionDeduction,
+    exertionGross: exertionIncome,
+    pensionDeduction,
     exertionWithheld,
     exertionSources,
     passiveIncome,
@@ -196,6 +201,8 @@ function computeAll(cfg, persons, shared, lossCarryforward) {
     const withheld = pt.exertionWithheld;
     return {
       exertionIncome: pt.exertionIncome,
+      exertionGross: pt.exertionGross,
+      pensionDeduction: pt.pensionDeduction,
       exertionSources: pt.exertionSources,
       bracketTax,
       creditUsed,
@@ -332,7 +339,13 @@ function buildTable(res, mode, names) {
         })
       );
     }
-    if (maxSrc > 1)
+    if (T.some((t) => t.pensionDeduction > 0.5))
+      rows.push(
+        pair("ניכוי הפקדה לקופות גמל", (k) =>
+          T[k] && T[k].pensionDeduction > 0.5 ? minusCell(T[k].pensionDeduction) : dashCell
+        )
+      );
+    if (maxSrc > 1 || T.some((t) => t.pensionDeduction > 0.5))
       rows.push(pair("הכנסה חייבת (סה״כ)", (k) => (T[k] ? moneyCell(T[k].exertionIncome) : dashCell)));
     rows.push(pair("מס לפי מדרגות (לפני זיכוי)", (k) => (T[k] ? moneyCell(T[k].bracketTax) : dashCell)));
     rows.push(pair("זיכוי נקודות זיכוי", (k) => (T[k] ? minusCell(T[k].creditUsed) : dashCell)));
@@ -431,6 +444,19 @@ function buildTable(res, mode, names) {
 }
 
 // ----- compact inputs -----
+
+// Labelled wrapper: label (and optional 106 field code) above the input.
+function Field({ label, code, children }) {
+  return (
+    <div>
+      <label className="mb-1 block text-xs font-medium text-ink-soft">
+        {label}
+        {code && <span className="mr-1 text-slate-400">(קוד {code})</span>}
+      </label>
+      {children}
+    </div>
+  );
+}
 
 function MiniText({ value, onChange, placeholder, className = "" }) {
   return (
@@ -928,7 +954,90 @@ function SummaryTable({ data }) {
 
 // ----- one taxpayer -----
 
+// Hidden helper: build up a person's credit points from common entitlements.
+function CreditPointsCalc({ gender, onApply }) {
+  const [v, setV] = useState({
+    resident: true,
+    woman: gender === "female",
+    c05: "",
+    c617: "",
+    c18: "",
+    single: false,
+    immigrant: false,
+    soldier: false,
+    degree: false,
+  });
+  const set = (patch) => setV((s) => ({ ...s, ...patch }));
+
+  const items = [
+    { key: "resident", label: "תושב/ת ישראל", pts: 2.25, type: "check" },
+    { key: "woman", label: "אישה", pts: 0.5, type: "check" },
+    { key: "c05", label: "ילדים בגיל לידה–5", pts: 2.5, type: "count" },
+    { key: "c617", label: "ילדים בגיל 6–17", pts: 1, type: "count" },
+    { key: "c18", label: "ילדים בגיל 18", pts: 0.5, type: "count" },
+    { key: "single", label: "הורה במשפחה חד-הורית", pts: 1, type: "check" },
+    { key: "immigrant", label: "עולה חדש (שנה ראשונה)", pts: 1, type: "check" },
+    { key: "soldier", label: "חייל/ת משוחרר/ת (שנה)", pts: 1, type: "check" },
+    { key: "degree", label: "תואר אקדמי (שנה לאחר סיום)", pts: 1, type: "check" },
+  ];
+
+  const total = items.reduce((s, it) => {
+    if (it.type === "check") return s + (v[it.key] ? it.pts : 0);
+    return s + num(v[it.key]) * it.pts;
+  }, 0);
+
+  return (
+    <div className="mb-4 rounded-xl border border-brand-100 bg-brand-50/60 p-4">
+      <p className="mb-3 text-sm font-semibold text-ink">מחשבון נקודות זיכוי</p>
+      <div className="grid gap-x-6 gap-y-2 sm:grid-cols-2">
+        {items.map((it) => (
+          <label key={it.key} className="flex items-center justify-between gap-2 text-sm text-ink">
+            <span className="flex items-center gap-2">
+              {it.type === "check" ? (
+                <input
+                  type="checkbox"
+                  checked={v[it.key]}
+                  onChange={(e) => set({ [it.key]: e.target.checked })}
+                  className="h-4 w-4 accent-brand-600"
+                />
+              ) : (
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  dir="ltr"
+                  value={v[it.key]}
+                  placeholder="0"
+                  onChange={(e) => set({ [it.key]: e.target.value.replace(/[^\d]/g, "") })}
+                  className="w-12 rounded-lg border border-slate-200 px-2 py-1 text-center text-sm outline-none focus:border-brand-500"
+                />
+              )}
+              {it.label}
+            </span>
+            <span className="text-xs text-ink-soft">{it.pts} נק׳</span>
+          </label>
+        ))}
+      </div>
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-brand-100 pt-3">
+        <span className="text-sm text-ink">
+          סה״כ: <span className="font-extrabold text-brand-700">{total.toFixed(2)}</span> נק׳
+        </span>
+        <button
+          type="button"
+          onClick={() => onApply(Number(total.toFixed(2)))}
+          className="rounded-full bg-brand-700 px-4 py-1.5 text-sm font-semibold text-white transition hover:bg-brand-800"
+        >
+          החל על נקודות הזיכוי
+        </button>
+      </div>
+      <p className="mt-2 text-xs text-ink-soft">
+        אומדן על בסיס הזכאויות הנפוצות — נקודות עולה/חייל/תואר משתנות לפי ותק. מומלץ לאמת מול תלוש/פקיד שומה.
+      </p>
+    </div>
+  );
+}
+
 function PersonCard({ person, title, showName, onName, onGender, onPoints, onDocChange, onAddDoc, onRemoveDoc }) {
+  const [showCalc, setShowCalc] = useState(false);
   return (
     <div className="card">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -942,7 +1051,7 @@ function PersonCard({ person, title, showName, onName, onGender, onPoints, onDoc
         ) : (
           <SectionTitle>{title}</SectionTitle>
         )}
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <div className="inline-flex rounded-full border border-slate-200 bg-white p-1">
             {[
               { k: "male", t: "גבר" },
@@ -964,8 +1073,25 @@ function PersonCard({ person, title, showName, onName, onGender, onPoints, onDoc
             נק׳ זיכוי
             <MiniNum value={person.points} onChange={onPoints} className="w-16" />
           </label>
+          <button
+            type="button"
+            onClick={() => setShowCalc((v) => !v)}
+            className="text-sm font-semibold text-brand-700 hover:underline"
+          >
+            {showCalc ? "סגור מחשבון" : "מחשבון נק׳ זיכוי"}
+          </button>
         </div>
       </div>
+
+      {showCalc && (
+        <CreditPointsCalc
+          gender={person.gender}
+          onApply={(pts) => {
+            onPoints(String(pts));
+            setShowCalc(false);
+          }}
+        />
+      )}
 
       <div className="space-y-3">
         {person.docs.map((d, idx) => (
@@ -1045,27 +1171,42 @@ function DocCard({ doc, index, onChange, onRemove }) {
       </div>
 
       {doc.type === "106" && (
-        <div className="flex flex-wrap items-center gap-2">
-          <MiniText
-            value={doc.employer}
-            placeholder="שם המעסיק"
-            onChange={(v) => onChange({ employer: v })}
-            className="min-w-[9rem] flex-1"
-          />
-          <MiniNum
-            value={doc.income}
-            placeholder="הכנסה חייבת ₪"
-            thousands
-            onChange={(v) => onChange({ income: v })}
-            className="w-36"
-          />
-          <MiniNum
-            value={doc.withheld}
-            placeholder="מס שנוכה ₪"
-            thousands
-            onChange={(v) => onChange({ withheld: v })}
-            className="w-32"
-          />
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <Field label="שם המעסיק">
+            <MiniText
+              value={doc.employer}
+              placeholder="שם המעסיק"
+              onChange={(v) => onChange({ employer: v })}
+              className="w-full"
+            />
+          </Field>
+          <Field label="משכורת" code="158">
+            <MiniNum
+              value={doc.income}
+              placeholder="0 ₪"
+              thousands
+              onChange={(v) => onChange({ income: v })}
+              className="w-full"
+            />
+          </Field>
+          <Field label="ניכוי הפקדה לקופות גמל" code="248">
+            <MiniNum
+              value={doc.pension}
+              placeholder="0 ₪"
+              thousands
+              onChange={(v) => onChange({ pension: v })}
+              className="w-full"
+            />
+          </Field>
+          <Field label="מס שנוכה במקור" code="042">
+            <MiniNum
+              value={doc.withheld}
+              placeholder="0 ₪"
+              thousands
+              onChange={(v) => onChange({ withheld: v })}
+              className="w-full"
+            />
+          </Field>
         </div>
       )}
 
