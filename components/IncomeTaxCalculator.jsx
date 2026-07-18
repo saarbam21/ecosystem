@@ -1180,7 +1180,7 @@ function DocCard({ doc, index, onChange, onRemove }) {
               className="w-full"
             />
           </Field>
-          <Field label="משכורת" code="158">
+          <Field label="משכורת" code="158/172">
             <MiniNum
               value={doc.income}
               placeholder="0 ₪"
@@ -1189,7 +1189,7 @@ function DocCard({ doc, index, onChange, onRemove }) {
               className="w-full"
             />
           </Field>
-          <Field label="ניכוי הפקדה לקופות גמל" code="248">
+          <Field label="ניכוי הפקדה לקופות גמל" code="248/249">
             <MiniNum
               value={doc.pension}
               placeholder="0 ₪"
@@ -1198,7 +1198,7 @@ function DocCard({ doc, index, onChange, onRemove }) {
               className="w-full"
             />
           </Field>
-          <Field label="מס שנוכה במקור" code="042">
+          <Field label="מס שנוכה במקור" code="042/043">
             <MiniNum
               value={doc.withheld}
               placeholder="0 ₪"
