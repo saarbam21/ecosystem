@@ -445,15 +445,17 @@ function buildTable(res, mode, names) {
 
 // ----- compact inputs -----
 
-// Labelled wrapper: label (and optional 106 field code) above the input.
+// Labelled wrapper: label (and optional 106 field code) above the input. Full
+// height with the input pinned to the bottom so boxes align even when a label
+// wraps to two lines.
 function Field({ label, code, children }) {
   return (
-    <div>
+    <div className="flex h-full flex-col">
       <label className="mb-1 block text-xs font-medium text-ink-soft">
         {label}
         {code && <span className="mr-1 text-slate-400">(קוד {code})</span>}
       </label>
-      {children}
+      <div className="mt-auto">{children}</div>
     </div>
   );
 }
